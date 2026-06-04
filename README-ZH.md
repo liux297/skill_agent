@@ -1,7 +1,7 @@
 ## Skill Agent
 
 **作者：** lfenghx  
-**版本：** 0.0.3
+**版本：** 0.0.4
 **类型：** Tool（工具插件）
 
 ### 简介
@@ -26,8 +26,10 @@ Skill Agent 是一个基于 “Skill 渐进式披露（Progressive Disclosure）
 本插件共有两个工具
 “技能管理”：用于管理技能目录，可查看技能，新增技能，删除技能。
 ![alt text](_assets/image-0.png)
-“agent_skill”：通用智能体，可用于执行已存入的技能。
+"agent_skill"：通用智能体，可用于执行已存入的技能。
 ![alt text](_assets/image-1.png)
+
+"agent_skill" 工具支持 `custom_variables` 参数，传入 JSON 键值对（如 `{"current_user":"Alice","team_id":"T123"}`），变量会被注入到 Agent 上下文中，技能可通过 `get_session_context()` 获取这些变量，方便技能脚本使用当前用户、团队等信息。
 
 ### 使用方式（在 Dify 中）
 

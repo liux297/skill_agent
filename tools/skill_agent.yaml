@@ -97,6 +97,22 @@ parameters:
     llm_description: How many recent turns to keep during the run.
     form: form
 
+  - name: custom_variables
+    type: string
+    required: false
+    label:
+      en_US: Custom Variables
+      zh_Hans: 自定义变量
+      pt_BR: Variáveis personalizadas
+      ja_JP: カスタム変数
+    human_description:
+      en_US: "JSON key-value pairs injected into the agent context, e.g. {\"current_user\":\"Alice\"}"
+      zh_Hans: "JSON 键值对，注入到 Agent 上下文中供技能使用，例如 {\"current_user\":\"Alice\"}"
+      pt_BR: "Pares chave-valor JSON injetados no contexto do agente"
+      ja_JP: "エージェントコンテキストに注入されるJSONキー・バリュー・ペア"
+    llm_description: "Optional JSON object of custom variables (e.g. current_user, team_id) that will be available to skills via get_session_context"
+    form: llm
+
   - name: history_turns
     type: number
     required: true

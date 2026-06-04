@@ -62,6 +62,15 @@ class SkillAgentTool(Tool):
         history_turns = int(tool_parameters.get("history_turns") or 0)
         system_prompt = tool_parameters.get("system_prompt") or "你是一个xxxx"
         skills_root = _detect_skills_root(tool_parameters.get("skills_root"))
+        custom_variables_raw = tool_parameters.get("custom_variables") or ""
+        custom_variables: dict[str, str] = {}
+        if isinstance(custom_variables_raw, str) and custom_variables_raw.strip():
+            try:
+                parsed = json.loads(custom_variables_raw.strip())
+                if isinstance(parsed, dict):
+                    custom_variables = {str(k): str(v) for k, v in parsed.items() if v is not None}
+            except (json.JSONDecodeError, TypeError):
+                custom_variables = {}
 
         if not query or not isinstance(query, str):
             yield self.create_text_message("❌缺少 query 参数\n")
@@ -181,6 +190,7 @@ class SkillAgentTool(Tool):
             session_dir=session_dir,
             max_steps=max_steps,
             memory_turns=memory_turns,
+            custom_variables=custom_variables,
         )
 
         history_messages: list[Any] = []
@@ -232,6 +242,12 @@ class SkillAgentTool(Tool):
             + "\n[会话路径]\n"
             + f"- session_dir: {session_dir}\n"
             + f"- skills_root: {skills_root}\n"
+            + (
+                "\n[自定义变量]\n"
+                + "以下变量由调用方注入，技能可通过 get_session_context 获取，在执行命令时可以作为参数引用：\n"
+                + "\n".join(f"- {k}: {v}" for k, v in custom_variables.items()) + "\n"
+                if custom_variables else ""
+            )
             + "你必须遵循渐进式披露流程：\n"
             + "1) 只根据技能元数据（name/description）判断可能相关的技能\n"
             + "2) 触发时才调用 get_skill_metadata 读取 SKILL.md（说明文档）\n"

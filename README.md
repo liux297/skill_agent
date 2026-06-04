@@ -1,7 +1,7 @@
 ## Skill Agent
 
 **Author:** lfenghx  
-**Version:** 0.0.3  
+**Version:** 0.0.4  
 **Type:** Tool (Plugin)
 
 ### Introduction
@@ -27,8 +27,10 @@ This plugin provides two tools:
 
 - “Skill Manager”: manages the local skills directory (list/add/delete skills)
   ![alt text](_assets/image-0.png)
-- “agent_skill”: a general agent that can execute skills that have been stored
+- "agent_skill": a general agent that can execute skills that have been stored
   ![alt text](_assets/image-1.png)
+
+The "agent_skill" tool accepts a `custom_variables` parameter — a JSON object of key-value pairs (e.g. `{"current_user":"Alice","team_id":"T123"}`) that will be injected into the agent context. Skills can access these variables via the `get_session_context()` action, making it easy to pass user identity, team info, or other runtime context to skills.
 
 ### How to Use (in Dify)
 

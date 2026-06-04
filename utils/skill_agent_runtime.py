@@ -29,11 +29,13 @@ class _AgentRuntime:
         session_dir: str,
         max_steps: int,
         memory_turns: int,
+        custom_variables: dict[str, str] | None = None,
     ) -> None:
         self.skills_root = skills_root
         self.session_dir = session_dir
         self.max_steps = max_steps
         self.memory_turns = memory_turns
+        self.custom_variables = custom_variables or {}
         self._skill_metadata_cache: dict[str, dict[str, Any]] = {}
         self._skill_files_listed: set[str] = set()
 
@@ -138,6 +140,7 @@ class _AgentRuntime:
         return {
             "skills_root": self.skills_root,
             "session_dir": self.session_dir,
+            "custom_variables": self.custom_variables,
         }
 
     def run_skill_command(
