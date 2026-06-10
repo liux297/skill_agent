@@ -447,6 +447,9 @@ class SkillAgentTool(Tool):
                     continue
             return saved
 
+        # "TOOL_RESULT" 的所有前缀（从4字符开始），用于流式输出时检测部分匹配
+        _TOOL_RESULT_PREFIXES = tuple("TOOL_RESULT"[:i] for i in range(4, len("TOOL_RESULT") + 1))
+
         def invoke_llm_live(
             *, prompt_messages: list[Any], tools: list[Any] | None
         ) -> Generator[ToolInvokeMessage, None, tuple[str, list[Any], Any, int, bool]]:
@@ -469,9 +472,6 @@ class SkillAgentTool(Tool):
                 for i in range(0, len(tagged), step):
                     yield self.create_text_message(tagged[i : i + step])
                     streamed_any = True
-            
-            # "TOOL_RESULT" 的所有前缀（从4字符开始），用于流式输出时检测部分匹配
-            _TOOL_RESULT_PREFIXES = tuple("TOOL_RESULT"[:i] for i in range(4, len("TOOL_RESULT") + 1))
 
             def should_emit_user_text(text: str) -> bool:
                 if not text:
