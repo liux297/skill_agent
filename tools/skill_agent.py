@@ -473,6 +473,9 @@ class SkillAgentTool(Tool):
             def should_emit_user_text(text: str) -> bool:
                 if not text:
                     return False
+                # TOOL_RESULT 是内部协议格式，不应展示给用户
+                if text.lstrip().startswith("TOOL_RESULT"):
+                    return False
                 # 检测完整 JSON 协议响应并抑制展示
                 json_text = _extract_first_json_object(text)
                 if not json_text:
@@ -490,6 +493,10 @@ class SkillAgentTool(Tool):
                 """流式输出时，计算可安全输出的文本长度。
                 自然语言部分即时输出，遇到可能的 JSON 协议时截断等待。
                 """
+                # TOOL_RESULT 是内部协议，不应流式输出
+                tr_pos = text.find("TOOL_RESULT")
+                if tr_pos >= 0:
+                    return tr_pos
                 brace_pos = text.find("{")
                 if brace_pos < 0:
                     return len(text)
@@ -860,6 +867,17 @@ class SkillAgentTool(Tool):
                     except Exception:
                         action = None
                 _dbg(f"json_protocol detected={bool(action)} snippet={_shorten_text(json_text or '', 200)}")
+
+                # 检测 TOOL_RESULT 回声：LLM 把上轮的 TOOL_RESULT 当作自己的输出
+                # 这不是有效的 action，应提示 LLM 继续任务
+                if action and "name" in action and "result" in action and "type" not in action:
+                    _dbg(f"tool_result_echo detected, prompting continuation")
+                    messages.append(
+                        UserPromptMessage(
+                            content="你刚才输出了工具执行结果，但这不是你的回答。请继续完成任务：如果需要调用工具请输出 JSON，否则输出最终回答。"
+                        )
+                    )
+                    continue
 
                 if not res_text and not action and not nontext:
                     empty_responses += 1
