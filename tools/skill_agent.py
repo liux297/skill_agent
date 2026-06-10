@@ -327,6 +327,7 @@ class SkillAgentTool(Tool):
         final_text: str | None = None
         final_file_meta: dict[str, dict[str, str]] = {}
         empty_responses = 0
+        tool_result_echo_count = 0  # TOOL_RESULT 回声检测计数，防止无限循环
         saved_asset_fingerprints: set[str] = set()
         resume_saved = False
         final_text_already_streamed = False
@@ -475,6 +476,9 @@ class SkillAgentTool(Tool):
                     return False
                 s = str(text)
                 stripped = s.lstrip()
+                # TOOL_RESULT 是内部协议标记，不应展示给用户
+                if stripped.startswith("TOOL_RESULT"):
+                    return False
                 # 以 { 开头但尚未形成完整 JSON，暂不输出（等待更多数据）
                 if stripped.startswith("{") and _extract_first_json_object(s) is None:
                     return False
@@ -492,7 +496,12 @@ class SkillAgentTool(Tool):
                 if not isinstance(obj, dict):
                     return True
                 t = obj.get("type")
-                return t not in {"tool", "final"}
+                if t in {"tool", "final"}:
+                    return False
+                # TOOL_RESULT 回声格式：有 name+result 但无 type
+                if "name" in obj and "result" in obj and "type" not in obj:
+                    return False
+                return True
 
             try:
                 try:
@@ -843,6 +852,27 @@ class SkillAgentTool(Tool):
                     except Exception:
                         action = None
                 _dbg(f"json_protocol detected={bool(action)} snippet={_shorten_text(json_text or '', 200)}")
+
+                # 检测 TOOL_RESULT 回声：LLM 把上轮的 TOOL_RESULT 当作自己的输出
+                # 格式：{"name":"...","result":{...}} 无 type 字段，或文本以 TOOL_RESULT 开头
+                is_tool_result_echo = False
+                if action and "name" in action and "result" in action and "type" not in action:
+                    is_tool_result_echo = True
+                elif res_text and res_text.lstrip().startswith("TOOL_RESULT"):
+                    is_tool_result_echo = True
+
+                if is_tool_result_echo and tool_result_echo_count < 2:
+                    tool_result_echo_count += 1
+                    _dbg(f"tool_result_echo detected (count={tool_result_echo_count}), prompting final answer")
+                    messages.append(
+                        UserPromptMessage(
+                            content="你刚才输出了工具执行结果，但这不是给用户的回答。请直接用自然语言总结数据并给出最终回答，不要重复原始数据。"
+                        )
+                    )
+                    continue
+                # 超过重试次数，将回声内容当作最终文本（避免无限循环）
+                if is_tool_result_echo:
+                    _dbg(f"tool_result_echo max retries reached, treating as final text")
 
                 if not res_text and not action and not nontext:
                     empty_responses += 1
