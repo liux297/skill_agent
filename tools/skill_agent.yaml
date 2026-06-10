@@ -97,6 +97,22 @@ parameters:
     llm_description: How many recent turns to keep during the run.
     form: form
 
+  - name: system_prompt
+    type: string
+    required: false
+    label:
+      en_US: System Prompt
+      zh_Hans: 系统提示词
+      pt_BR: System Prompt
+      ja_JP: システムプロンプト
+    human_description:
+      en_US: "Custom system prompt to override the default agent behavior instructions."
+      zh_Hans: "自定义系统提示词，用于覆盖或增强默认的 Agent 行为指令。留空则使用内置默认提示词。"
+      pt_BR: "Prompt de sistema personalizado para substituir as instruções padrão do agente."
+      ja_JP: "エージェントのデフォルト動作指示を上書きするカスタムシステムプロンプト。"
+    llm_description: "Custom system prompt that overrides or extends the default agent behavior instructions. Leave empty to use built-in defaults."
+    form: llm
+
   - name: custom_variables
     type: string
     required: false
@@ -112,6 +128,23 @@ parameters:
       ja_JP: "エージェントコンテキストに注入されるJSONキー・バリュー・ペア"
     llm_description: "Optional JSON object of custom variables (e.g. current_user, team_id) that will be available to skills via get_session_context"
     form: llm
+
+  - name: verbose
+    type: boolean
+    required: true
+    default: true
+    label:
+      en_US: Verbose Mode
+      zh_Hans: 详细模式
+      pt_BR: Modo verboso
+      ja_JP: 詳細モード
+    human_description:
+      en_US: "Show detailed tool execution progress (skill names, file paths, command output). Turn off for cleaner user-facing output."
+      zh_Hans: "是否显示详细的执行过程（技能名称、文件路径、命令输出等）。调试时建议开启，面向用户使用时可关闭以获得更简洁的输出。"
+      pt_BR: "Mostrar progresso detalhado da execução de ferramentas."
+      ja_JP: "ツール実行の詳細な進捗を表示するかどうか。"
+    llm_description: "Whether to show verbose execution details (tool names, paths, errors) to the end user."
+    form: form
 
   - name: history_turns
     type: number

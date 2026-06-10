@@ -61,6 +61,8 @@ class SkillAgentTool(Tool):
         memory_turns = int(tool_parameters.get("memory_turns") or 10)
         history_turns = int(tool_parameters.get("history_turns") or 0)
         system_prompt = tool_parameters.get("system_prompt") or "你是一个xxxx"
+        # 详细模式开关：控制是否向用户展示工具调用/执行细节（调试时开启，面向用户时可关闭）
+        verbose = tool_parameters.get("verbose") != False
         skills_root = _detect_skills_root(tool_parameters.get("skills_root"))
         custom_variables_raw = tool_parameters.get("custom_variables") or ""
         custom_variables: dict[str, str] = {}
@@ -330,6 +332,27 @@ class SkillAgentTool(Tool):
             s = re.sub(r"[A-Za-z]:\\[^\s\r\n\t\"']+", "<REDACTED_PATH>", s)
             s = re.sub(r"/[^\s\r\n\t\"']+", "<REDACTED_PATH>", s)
             return s
+
+        # 工具调用进度消息：verbose 开启时展示细节，关闭时只输出简洁描述
+        def emit_tool_progress(tool_name: str, detail: str = "") -> Generator[ToolInvokeMessage]:
+            if not verbose:
+                # 非详细模式：不暴露工具名和参数，仅输出通用处理提示
+                yield self.create_text_message("⏳ 正在处理…\n")
+                return
+            # 详细模式：展示具体工具名称和操作对象
+            _brief_map = {
+                "get_skill_metadata": f"✅正在查看技能《{detail}》说明书…",
+                "list_skill_files": f"✅正在查看技能《{detail}》文件结构…",
+                "read_skill_file": f"✅正在读取文件：{detail}…",
+                "run_skill_command": f"✅正在执行命令…",
+                "write_temp_file": f"✅正在写入文件：{detail}…",
+                "read_temp_file": f"✅正在读取临时文件：{detail}…",
+                "list_temp_files": "✅正在查看临时目录文件…",
+                "run_temp_command": "✅正在执行命令…",
+                "export_temp_file": f"✅正在标记交付文件：{detail}…",
+            }
+            msg = _brief_map.get(tool_name, f"✅正在执行 {tool_name}…")
+            yield self.create_text_message(msg + "\n")
 
         def persist_llm_assets(parts: Any) -> list[str]:
             if not parts or not isinstance(parts, list):
@@ -624,38 +647,17 @@ class SkillAgentTool(Tool):
                                 )
                                 continue
 
-                        if tool_name == "get_skill_metadata":
-                            yield self.create_text_message(
-                                f"✅正在查看技能《{str(arguments.get('skill_name') or '')}》说明书…\n"
-                            )
-                        elif tool_name == "list_skill_files":
-                            yield self.create_text_message(
-                                f"✅正在查看技能《{str(arguments.get('skill_name') or '')}》文件结构…\n"
-                            )
-                        elif tool_name == "read_skill_file":
-                            yield self.create_text_message(
-                                f"✅正在读取技能《{str(arguments.get('skill_name') or '')}》文件：{str(arguments.get('relative_path') or '')}…\n"
-                            )
-                        elif tool_name == "run_skill_command":
-                            yield self.create_text_message(
-                                f"✅正在执行技能《{str(arguments.get('skill_name') or '')}》命令…\n"
-                            )
-                        elif tool_name == "write_temp_file":
-                            yield self.create_text_message(
-                                f"✅正在按说明书写入临时文件：{str(arguments.get('relative_path') or '')}…\n"
-                            )
-                        elif tool_name == "read_temp_file":
-                            yield self.create_text_message(
-                                f"✅正在读取临时文件：{str(arguments.get('relative_path') or '')}…\n"
-                            )
-                        elif tool_name == "list_temp_files":
-                            yield self.create_text_message("✅正在查看临时目录文件…\n")
-                        elif tool_name == "run_temp_command":
-                            yield self.create_text_message("✅正在执行临时命令…\n")
-                        elif tool_name == "export_temp_file":
-                            yield self.create_text_message(
-                                f"✅正在标记交付文件：{str(arguments.get('temp_relative_path') or '')}…\n"
-                            )
+                        # 构建工具操作描述（用于详细模式展示，非详细模式不使用）
+                        _skill_name_arg = str(arguments.get("skill_name") or "")
+                        _rel_path_arg = str(arguments.get("relative_path") or "")
+                        _tp_detail = (
+                            _skill_name_arg
+                            if tool_name in ("get_skill_metadata", "list_skill_files")
+                            else (_rel_path_arg if tool_name in ("write_temp_file", "read_temp_file")
+                            else (str(arguments.get("temp_relative_path") or "") if tool_name == "export_temp_file"
+                            else ""))
+                        )
+                        yield from emit_tool_progress(tool_name, _tp_detail)
 
                         if tool_name == "get_skill_metadata":
                             result = runtime.get_skill_metadata(str(arguments.get("skill_name") or ""))
@@ -685,19 +687,26 @@ class SkillAgentTool(Tool):
                                 and int(result.get("returncode") or 0) != 0
                             ):
                                 stderr = str(result.get("stderr") or "").strip()
-                                if stderr:
+                                if stderr and verbose:
                                     yield self.create_text_message(
                                         "❌命令执行失败（stderr）：\n" + _shorten_text(redact_user_visible_text(stderr), 1200) + "\n"
                                     )
                             if isinstance(result, dict) and result.get("error") == "no_executable_found":
                                 skill = str(result.get("skill") or arguments.get("skill_name") or "")
                                 module = str(result.get("module") or "")
-                                forced_text = (
+                                # 详细模式展示技术细节，非详细模式给出简洁提示
+                                if verbose:
+                                    forced_text = (
                                     f"当前技能“{skill}”的说明文档要求生成文件，但技能包内未找到可执行入口（例如脚本或 Python 模块）。\n"
                                     f"本次尝试的入口为 python -m {module}，但在技能目录中不存在，因此无法继续生成目标文件。\n\n"
                                     "我已先按技能说明生成了可交付的中间产物（例如设计哲学 .md）。\n"
                                     "你是否允许我在 temp 目录中自行创建可执行脚本，并在需要时安装依赖后，再尝试生成最终文件？"
-                                )
+                                    )
+                                else:
+                                    forced_text = (
+                                        '技能"' + skill + '"需要可执行脚本来完成生成任务，但当前环境中暂无可用入口。\n\n'
+                                        "我先生成了可交付的中间产物。是否允许我创建必要的脚本后继续完成？"
+                                    )
                                 _storage_set_json(
                                     storage,
                                     resume_key,
@@ -747,7 +756,7 @@ class SkillAgentTool(Tool):
                                 and int(result.get("returncode") or 0) != 0
                             ):
                                 stderr = str(result.get("stderr") or "").strip()
-                                if stderr:
+                                if stderr and verbose:
                                     yield self.create_text_message(
                                         "❌命令执行失败（stderr）：\n" + _shorten_text(redact_user_visible_text(stderr), 1200) + "\n"
                                     )
@@ -910,28 +919,17 @@ class SkillAgentTool(Tool):
                 _dbg(f"json_tool name={name} args={_shorten_text(arguments, 400)}")
                 messages.append(AssistantPromptMessage(content=json.dumps(action, ensure_ascii=False)))
 
-                if name == "get_skill_metadata":
-                    yield self.create_text_message(f"✅正在查看技能《{str(arguments.get('skill_name') or '')}》说明书…\n")
-                elif name == "list_skill_files":
-                    yield self.create_text_message(f"✅正在查看技能《{str(arguments.get('skill_name') or '')}》文件结构…\n")
-                elif name == "read_skill_file":
-                    yield self.create_text_message(
-                        f"✅正在读取技能《{str(arguments.get('skill_name') or '')}》文件：{str(arguments.get('relative_path') or '')}…\n"
-                    )
-                elif name == "run_skill_command":
-                    yield self.create_text_message(
-                        f"✅正在执行技能《{str(arguments.get('skill_name') or '')}》命令…\n"
-                    )
-                elif name == "write_temp_file":
-                    yield self.create_text_message(f"✅正在按说明书写入临时文件：{str(arguments.get('relative_path') or '')}…\n")
-                elif name == "read_temp_file":
-                    yield self.create_text_message(f"✅正在读取临时文件：{str(arguments.get('relative_path') or '')}…\n")
-                elif name == "list_temp_files":
-                    yield self.create_text_message("✅正在查看临时目录文件…\n")
-                elif name == "run_temp_command":
-                    yield self.create_text_message("✅正在执行临时命令…\n")
-                elif name == "export_temp_file":
-                    yield self.create_text_message(f"✅正在标记交付文件：{str(arguments.get('temp_relative_path') or '')}…\n")
+                # JSON 协议路径：统一使用 emit_tool_progress 输出进度
+                _j_skill = str(arguments.get("skill_name") or "")
+                _j_rel = str(arguments.get("relative_path") or "")
+                _j_detail = (
+                    _j_skill
+                    if name in ("get_skill_metadata", "list_skill_files")
+                    else (_j_rel if name in ("write_temp_file", "read_temp_file")
+                    else (str(arguments.get("temp_relative_path") or "") if name == "export_temp_file"
+                    else ""))
+                )
+                yield from emit_tool_progress(name, _j_detail)
 
                 if name == "get_skill_metadata":
                     result = runtime.get_skill_metadata(str(arguments.get("skill_name") or ""))
