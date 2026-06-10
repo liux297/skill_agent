@@ -20,12 +20,21 @@ def _detect_skills_root(explicit_path: str | None) -> str | None:
     if env_path and os.path.isdir(env_path):
         return os.path.abspath(env_path)
 
+    # 优先使用插件目录外的持久化路径，避免升级插件时技能被清空
     plugin_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    persistent_root = os.path.join(os.path.dirname(plugin_root), "skill_agent_data", "skills")
+    if os.path.isdir(persistent_root):
+        return os.path.abspath(persistent_root)
+
+    # 回退到插件目录内的 skills/（兼容旧版）
     candidates = [os.path.join(plugin_root, "skills")]
     for p in candidates:
         if os.path.isdir(p):
             return os.path.abspath(p)
-    return None
+
+    # 都不存在时，创建持久化路径并返回，确保新安装也能正常使用
+    os.makedirs(persistent_root, exist_ok=True)
+    return os.path.abspath(persistent_root)
 
 
 def _cleanup_old_temp_sessions(temp_root: str, *, keep: int, protect_dirs: set[str] | None = None) -> None:

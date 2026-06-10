@@ -89,7 +89,8 @@ class SkillAgentTool(Tool):
         is_resuming = False
 
         plugin_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        temp_root = os.path.join(plugin_root, "temp")
+        # temp 目录放在插件目录外的持久化路径，避免升级时丢失
+        temp_root = os.path.join(os.path.dirname(plugin_root), "skill_agent_data", "temp")
         os.makedirs(temp_root, exist_ok=True)
         persisted_session_dir = _storage_get_text(storage, session_dir_key).strip()
         if persisted_session_dir and os.path.isdir(persisted_session_dir):
