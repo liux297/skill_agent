@@ -470,21 +470,19 @@ class SkillAgentTool(Tool):
                     yield self.create_text_message(tagged[i : i + step])
                     streamed_any = True
             
-            def _is_internal_json(obj: dict) -> bool:
-                """判断 JSON 是否为内部协议格式（不应展示给用户）"""
-                t = obj.get("type")
-                if t in ("tool", "final"):
-                    return True
-                # TOOL_RESULT 回声格式：有 name+result 但无 type
-                if "name" in obj and "result" in obj and "type" not in obj:
-                    return True
-                return False
-
             def should_emit_user_text(text: str) -> bool:
                 if not text:
                     return False
+                s = str(text)
+                stripped = s.lstrip()
+                # 以 { 开头但尚未形成完整 JSON，暂不输出（等待更多数据）
+                if stripped.startswith("{") and _extract_first_json_object(s) is None:
+                    return False
+                # 以 ``` 开头但代码块未闭合，暂不输出
+                if stripped.startswith("```") and stripped.count("```") < 2:
+                    return False
                 # TOOL_RESULT 是内部协议格式，不应展示给用户
-                if text.lstrip().startswith("TOOL_RESULT"):
+                if stripped.startswith("TOOL_RESULT"):
                     return False
                 # 检测完整 JSON 协议响应并抑制展示
                 json_text = _extract_first_json_object(text)
@@ -496,7 +494,13 @@ class SkillAgentTool(Tool):
                     return True
                 if not isinstance(obj, dict):
                     return True
-                return not _is_internal_json(obj)
+                t = obj.get("type")
+                if t in ("tool", "final"):
+                    return False
+                # TOOL_RESULT 回声格式：有 name+result 但无 type
+                if "name" in obj and "result" in obj and "type" not in obj:
+                    return False
+                return True
 
             def _safe_stream_boundary(text: str) -> int:
                 """流式输出时，计算可安全输出的文本长度。
@@ -509,19 +513,12 @@ class SkillAgentTool(Tool):
                 brace_pos = text.find("{")
                 if brace_pos < 0:
                     return len(text)
-                # { 之后是否有完整 JSON
-                after_brace = text[brace_pos:]
-                json_text = _extract_first_json_object(after_brace)
-                if json_text:
-                    try:
-                        obj = json.loads(json_text)
-                        if isinstance(obj, dict) and _is_internal_json(obj):
-                            return brace_pos  # 是内部协议，只输出 JSON 之前的部分
-                    except Exception:
-                        pass
-                    return len(text)  # JSON 不是内部协议，全部可输出
-                # JSON 未完成，只输出 { 之前的部分
-                return brace_pos
+                # { 之前有自然语言内容，先输出这些
+                if brace_pos > 0:
+                    return brace_pos
+                # 文本以 { 开头，should_emit_user_text 会处理延迟逻辑
+                # 这里返回 0，让 should_emit_user_text 判断是否输出
+                return 0
 
             try:
                 try:
@@ -573,9 +570,9 @@ class SkillAgentTool(Tool):
                         text_parts.append(t)
                         combined_text_live = "".join(text_parts).strip()
                         if combined_text_live and not saw_tool_calls:
-                            # 计算可安全流式输出的文本边界（JSON 之前的自然语言部分）
+                            # 计算可安全流式输出的文本边界（JSON/TOOL_RESULT 之前的自然语言部分）
                             safe_len = _safe_stream_boundary(combined_text_live)
-                            safe_text = combined_text_live[:safe_len]
+                            safe_text = combined_text_live[:safe_len] if safe_len > 0 else combined_text_live
                             if safe_text and should_emit_user_text(safe_text):
                                 if not emitted_prefix:
                                     yield self.create_text_message("\n【🤖Skill_Agent】\n")
