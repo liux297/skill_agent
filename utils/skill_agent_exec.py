@@ -20,19 +20,19 @@ def _detect_skills_root(explicit_path: str | None) -> str | None:
     if env_path and os.path.isdir(env_path):
         return os.path.abspath(env_path)
 
-    # 优先使用插件目录外的持久化路径，避免升级插件时技能被清空
     plugin_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     persistent_root = os.path.join(os.path.dirname(plugin_root), "skill_agent_data", "skills")
-    if os.path.isdir(persistent_root):
+    legacy_root = os.path.join(plugin_root, "skills")
+
+    # 优先使用旧版 skills/ 目录（如果存在且有内容），确保已有技能不丢失
+    if os.path.isdir(legacy_root) and os.listdir(legacy_root):
+        return os.path.abspath(legacy_root)
+
+    # 使用插件目录外的持久化路径，避免升级插件时技能被清空
+    if os.path.isdir(persistent_root) and os.listdir(persistent_root):
         return os.path.abspath(persistent_root)
 
-    # 回退到插件目录内的 skills/（兼容旧版）
-    candidates = [os.path.join(plugin_root, "skills")]
-    for p in candidates:
-        if os.path.isdir(p):
-            return os.path.abspath(p)
-
-    # 都不存在时，创建持久化路径并返回，确保新安装也能正常使用
+    # 都不存在或为空时，创建持久化路径并返回
     os.makedirs(persistent_root, exist_ok=True)
     return os.path.abspath(persistent_root)
 
