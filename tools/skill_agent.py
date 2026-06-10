@@ -469,17 +469,8 @@ class SkillAgentTool(Tool):
                     yield self.create_text_message(tagged[i : i + step])
                     streamed_any = True
             
-            def should_emit_user_text(text: str, *, streaming: bool = False) -> bool:
+            def should_emit_user_text(text: str) -> bool:
                 if not text:
-                    return False
-                s = str(text)
-                stripped = s.lstrip()
-                # 流式输出时，如果文本以 { 开头但尚未形成完整 JSON，暂不输出（等待更多数据）
-                # 避免将 JSON 协议的工具调用逐字展示给用户
-                if streaming and stripped.startswith("{") and _extract_first_json_object(s) is None:
-                    return False
-                # 流式输出时，如果文本以 ``` 开头但代码块未闭合，暂不输出
-                if streaming and stripped.startswith("```") and stripped.count("```") < 2:
                     return False
                 # 检测完整 JSON 协议响应并抑制展示
                 json_text = _extract_first_json_object(text)
@@ -493,6 +484,27 @@ class SkillAgentTool(Tool):
                     return True
                 t = obj.get("type")
                 return t not in {"tool", "final"}
+
+            def _safe_stream_boundary(text: str) -> int:
+                """流式输出时，计算可安全输出的文本长度。
+                自然语言部分即时输出，遇到可能的 JSON 协议时截断等待。
+                """
+                brace_pos = text.find("{")
+                if brace_pos < 0:
+                    return len(text)
+                # { 之后是否有完整 JSON
+                after_brace = text[brace_pos:]
+                json_text = _extract_first_json_object(after_brace)
+                if json_text:
+                    try:
+                        obj = json.loads(json_text)
+                        if isinstance(obj, dict) and obj.get("type") in ("tool", "final"):
+                            return brace_pos  # 是协议响应，只输出 JSON 之前的部分
+                    except Exception:
+                        pass
+                    return len(text)  # JSON 不是协议类型，全部可输出
+                # JSON 未完成，只输出 { 之前的部分
+                return brace_pos
 
             try:
                 try:
@@ -543,17 +555,21 @@ class SkillAgentTool(Tool):
                     if t:
                         text_parts.append(t)
                         combined_text_live = "".join(text_parts).strip()
-                        if combined_text_live and not saw_tool_calls and should_emit_user_text(combined_text_live, streaming=True):
-                            if not emitted_prefix:
-                                yield self.create_text_message("\n【🤖Skill_Agent】\n")
-                                emitted_prefix = True
-                            new = combined_text_live[emitted_len:]
-                            if new:
-                                step = max(1, int(typing_chunk))
-                                for i in range(0, len(new), step):
-                                    yield self.create_text_message(new[i : i + step])
-                                    streamed_any = True
-                                emitted_len = len(combined_text_live)
+                        if combined_text_live and not saw_tool_calls:
+                            # 计算可安全流式输出的文本边界（JSON 之前的自然语言部分）
+                            safe_len = _safe_stream_boundary(combined_text_live)
+                            safe_text = combined_text_live[:safe_len]
+                            if safe_text and should_emit_user_text(safe_text):
+                                if not emitted_prefix:
+                                    yield self.create_text_message("\n【🤖Skill_Agent】\n")
+                                    emitted_prefix = True
+                                new = safe_text[emitted_len:]
+                                if new:
+                                    step = max(1, int(typing_chunk))
+                                    for i in range(0, len(new), step):
+                                        yield self.create_text_message(new[i : i + step])
+                                        streamed_any = True
+                                emitted_len = len(safe_text)
                 combined_text = "".join(text_parts).strip()
                 if emitted_prefix:
                     yield self.create_text_message("\n\n")
