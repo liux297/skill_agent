@@ -1,55 +1,54 @@
-<!--
-  ~ Dify Marketplace Template Icon
-  ~ Dify 市场模板图标
-  ~ Dify マーケットプレイステンプレートアイコン
-  ~
-  ~ WARNING / 警告 / 警告:
-  ~ 
-  ~ English: This is a TEMPLATE icon from Dify Marketplace only. You MUST NOT use this default icon in any way.
-  ~ Please replace it with your own custom icon before submit this plugin.
-  ~ 
-  ~ 中文: 这只是来自 Dify 市场的模板图标。您绝对不能以任何方式使用此默认图标。
-  ~ 请在提交此插件之前将其替换为您自己的自定义图标。
-  ~ 
-  ~ 日本語: これは Dify マーケットプレイスのテンプレートアイコンです。このデフォルトアイコンをいかなる方法でも使用してはいけません。
-  ~ このプラグインを提出する前に、独自のカスタムアイコンに置き換えてください。
-  ~ 
-  ~ DIFY_MARKETPLACE_TEMPLATE_ICON_DO_NOT_USE
-  -->
-<svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g clip-path="url(#clip0_15255_46435)">
-<rect width="40" height="40" fill="#0033FF"/>
-<g filter="url(#filter0_n_15255_46435)">
-<rect width="40" height="40" fill="url(#paint0_linear_15255_46435)"/>
-</g>
-<path d="M28 10C28.5523 10 29 10.4477 29 11V16C29 16.5523 28.5523 17 28 17H23V30C23 30.5523 22.5523 31 22 31H18C17.4477 31 17 30.5523 17 30V17H11.5C10.9477 17 10.5 16.5523 10.5 16V13.618C10.5 13.2393 10.714 12.893 11.0528 12.7236L16.5 10H28ZM23 12H16.9721L12.5 14.2361V15H19V29H21V15H23V12ZM27 12H25V15H27V12Z" fill="white"/>
-</g>
-<defs>
-<filter id="filter0_n_15255_46435" x="0" y="0" width="40" height="40" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
-<feFlood flood-opacity="0" result="BackgroundImageFix"/>
-<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-<feTurbulence type="fractalNoise" baseFrequency="2 2" stitchTiles="stitch" numOctaves="3" result="noise" seed="8033" />
-<feComponentTransfer in="noise" result="coloredNoise1">
-<feFuncR type="linear" slope="2" intercept="-0.5" />
-<feFuncG type="linear" slope="2" intercept="-0.5" />
-<feFuncB type="linear" slope="2" intercept="-0.5" />
-<feFuncA type="discrete" tableValues="1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 "/>
-</feComponentTransfer>
-<feComposite operator="in" in2="shape" in="coloredNoise1" result="noise1Clipped" />
-<feComponentTransfer in="noise1Clipped" result="color1">
-<feFuncA type="table" tableValues="0 0.06" />
-</feComponentTransfer>
-<feMerge result="effect1_noise_15255_46435">
-<feMergeNode in="shape" />
-<feMergeNode in="color1" />
-</feMerge>
-</filter>
-<linearGradient id="paint0_linear_15255_46435" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
-<stop stop-color="#1F4CFF"/>
-<stop offset="1" stop-color="#0033FF"/>
-</linearGradient>
-<clipPath id="clip0_15255_46435">
-<rect width="40" height="40" fill="white"/>
-</clipPath>
-</defs>
+<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6C5CE7"/>
+      <stop offset="100%" stop-color="#0984E3"/>
+    </linearGradient>
+    <linearGradient id="iconGrad" x1="20" y1="25" x2="80" y2="75" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#E8E8F0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 圆角矩形背景 -->
+  <rect x="4" y="4" width="92" height="92" rx="22" fill="url(#bgGrad)"/>
+
+  <!-- 主体：AI Agent 头像 + 技能符号 -->
+  <g transform="translate(50,50)">
+    <!-- 外圈光环（代表技能连接） -->
+    <circle cx="0" cy="-3" r="30" stroke="rgba(255,255,255,0.18)" stroke-width="1.5" fill="none" stroke-dasharray="6 4"/>
+
+    <!-- 左上技能节点 -->
+    <circle cx="-19" cy="-17" r="5.5" fill="rgba(255,255,255,0.9)"/>
+    <path d="M-21.5 -17 L-16.5 -17 M-19 -19.5 L-19 -14.5" stroke="#6C5CE7" stroke-width="1.8" stroke-linecap="round"/>
+
+    <!-- 右上技能节点 -->
+    <circle cx="19" cy="-17" r="5.5" fill="rgba(255,255,255,0.9)"/>
+    <path d="M16 -15.5 L22 -18.5 M16 -18.5 L22 -15.5" stroke="#0984E3" stroke-width="1.8" stroke-linecap="round"/>
+
+    <!-- 右下技能节点 -->
+    <circle cx="16" cy="13" r="5" fill="rgba(255,255,255,0.85)"/>
+    <path d="M13.5 13 L18.5 13 M16 10.5 L16 15.5" stroke="#0984E3" stroke-width="1.6" stroke-linecap="round"/>
+
+    <!-- 中心 AI Agent 头像 -->
+    <rect x="-12" y="-14" width="24" height="22" rx="6" fill="white"/>
+
+    <!-- 头部天线/信号 -->
+    <line x1="0" y1="-14" x2="0" y2="-21" stroke="white" stroke-width="2" stroke-linecap="round"/>
+    <circle cx="0" cy="-23" r="2.5" fill="white"/>
+
+    <!-- 眼睛 -->
+    <circle cx="-5" cy="-6" r="2.8" fill="#6C5CE7"/>
+    <circle cx="5" cy="-6" r="2.8" fill="#0984E3"/>
+
+    <!-- 嘴巴/处理指示器 -->
+    <rect x="-5" y="1" width="10" height="2.5" rx="1.2" fill="#A29BFE"/>
+
+    <!-- 身体/躯干 -->
+    <path d="M-8 8 L-10 18 Q-10 21 -7 21 L7 21 Q10 21 10 18 L8 8 Z" fill="url(#iconGrad)" opacity="0.95"/>
+
+    <!-- 躯干上的技能槽位 -->
+    <line x1="-4" y1="12" x2="4" y2="12" stroke="#6C5CE7" stroke-width="1.5" stroke-linecap="round"/>
+    <line x1="-3" y1="16" x2="3" y2="16" stroke="#0984E3" stroke-width="1.5" stroke-linecap="round"/>
+  </g>
 </svg>

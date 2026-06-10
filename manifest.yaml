@@ -1,4 +1,4 @@
-version: 0.2.0
+version: 0.2.1
 type: plugin
 author: liux297
 name: skill_agent
@@ -38,7 +38,7 @@ plugins:
   tools:
     - provider/skill_agent.yaml
 meta:
-  version: 0.2.0
+  version: 0.2.1
   arch:
     - amd64
     - arm64
