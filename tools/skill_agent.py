@@ -267,6 +267,13 @@ class SkillAgentTool(Tool):
             + "补充规则3：默认值只能在用户明确说‘默认/随便/你决定’时启用；用户未回复不等于选择了默认。"
             + "补充规则4：当你准备调用 write_temp_file 时，必须先在自然语言里输出一行“写入意图确认”，包含：relative_path + 内容摘要（前 80 字）+ 大致长度；然后再发起工具调用。relative_path 必须是文件路径（不能是空、'.'、'..'、不能以 '/' 结尾，不能指向目录）。\n"
             + "补充规则5：如果收到的命令执行结果（stdout）是 JSON 格式，你必须将其转换为结构化的中文自然语言摘要（如表格、列表等），禁止直接输出原始 JSON。\n"
+            + "补充规则6：技能管理流程——当用户上传技能压缩包（zip）并要求添加/安装技能时，请按以下步骤执行：\n"
+            + "  (1) 如果上传的是 zip 文件且尚未解压，先用 run_temp_command 执行 unzip 解压到 session_dir\n"
+            + "  (2) 调用 install_skill(source_path=解压后目录或zip路径, skill_name=用户指定的名称) 安装到 skills_root\n"
+            + "  (3) 安装成功后即可通过 get_skill_metadata / list_skill_files 等工具使用该技能\n"
+            + "  (4) 如需查看已安装的全部技能，调用 list_installed_skills()\n"
+            + "  (5) 如需删除技能，调用 uninstall_skill(skill_name)\n"
+            + "  (6) 如需更新已有技能，调用 update_skill(skill_name, source_path)，source_path 为新的 zip 或解压目录\n"
             + (uploads_context or "")
             + "你必须把实现过程中的中间产物写入 temp 会话目录（脚本、草稿、生成物等）：\n"
             + "- 写文本：write_temp_file\n"
@@ -283,7 +290,11 @@ class SkillAgentTool(Tool):
             + "- read_temp_file(relative_path, max_chars)\n"
             + "- list_temp_files(max_depth)\n"
             + "- run_temp_command(command, cwd_relative, auto_install)\n"
-            + "- export_temp_file(temp_relative_path, workspace_relative_path, overwrite)  # 不复制，仅标记交付名\n\n"
+            + "- export_temp_file(temp_relative_path, workspace_relative_path, overwrite)  # 不复制，仅标记交付名\n"
+            + "- install_skill(source_path, skill_name)  # 从上传的 zip/目录安装技能到 skills_root\n"
+            + "- list_installed_skills()  # 查看所有已安装技能\n"
+            + "- uninstall_skill(skill_name)  # 按名称删除已安装技能\n"
+            + "- update_skill(skill_name, source_path)  # 按名称用新 zip/目录覆盖更新技能\n\n"
             + "如果模型支持 function call，请直接发起工具调用；若不支持，则用 JSON 协议响应：\n"
             + '{"type":"tool","name":"get_skill_metadata","arguments":{"skill_name":"xxx"}}\n'
             + '或 {"type":"final","content":"..."}\n\n'
@@ -350,6 +361,11 @@ class SkillAgentTool(Tool):
                 "list_temp_files": "✅正在查看临时目录文件…",
                 "run_temp_command": "✅正在执行命令…",
                 "export_temp_file": f"✅正在标记交付文件：{detail}…",
+                # 技能管理工具
+                "install_skill": f"✅正在安装技能《{detail}》…",
+                "list_installed_skills": "✅正在查看已安装技能列表…",
+                "uninstall_skill": f"✅正在卸载技能《{detail}》…",
+                "update_skill": f"✅正在更新技能《{detail}》…",
             }
             msg = _brief_map.get(tool_name, f"✅正在执行 {tool_name}…")
             yield self.create_text_message(msg + "\n")
@@ -652,7 +668,10 @@ class SkillAgentTool(Tool):
                         _rel_path_arg = str(arguments.get("relative_path") or "")
                         _tp_detail = (
                             _skill_name_arg
-                            if tool_name in ("get_skill_metadata", "list_skill_files")
+                            if tool_name in (
+                                "get_skill_metadata", "list_skill_files",
+                                "install_skill", "uninstall_skill", "update_skill",
+                            )
                             else (_rel_path_arg if tool_name in ("write_temp_file", "read_temp_file")
                             else (str(arguments.get("temp_relative_path") or "") if tool_name == "export_temp_file"
                             else ""))
@@ -780,6 +799,23 @@ class SkillAgentTool(Tool):
                                     "filename": out_name,
                                     "mime_type": _guess_mime_type(out_name),
                                 }
+                        # 技能管理工具分发
+                        elif tool_name == "install_skill":
+                            result = runtime.install_skill(
+                                source_path=str(arguments.get("source_path") or ""),
+                                skill_name=str(arguments.get("skill_name") or ""),
+                            )
+                        elif tool_name == "list_installed_skills":
+                            result = runtime.list_installed_skills()
+                        elif tool_name == "uninstall_skill":
+                            result = runtime.uninstall_skill(
+                                skill_name=str(arguments.get("skill_name") or ""),
+                            )
+                        elif tool_name == "update_skill":
+                            result = runtime.update_skill(
+                                skill_name=str(arguments.get("skill_name") or ""),
+                                source_path=str(arguments.get("source_path") or ""),
+                            )
                         else:
                             result = {"error": f"unknown tool: {tool_name}"}
 
@@ -924,7 +960,10 @@ class SkillAgentTool(Tool):
                 _j_rel = str(arguments.get("relative_path") or "")
                 _j_detail = (
                     _j_skill
-                    if name in ("get_skill_metadata", "list_skill_files")
+                    if name in (
+                        "get_skill_metadata", "list_skill_files",
+                        "install_skill", "uninstall_skill", "update_skill",
+                    )
                     else (_j_rel if name in ("write_temp_file", "read_temp_file")
                     else (str(arguments.get("temp_relative_path") or "") if name == "export_temp_file"
                     else ""))
@@ -991,6 +1030,23 @@ class SkillAgentTool(Tool):
                             "filename": out_name,
                             "mime_type": _guess_mime_type(out_name),
                         }
+                # 技能管理工具分发（JSON 协议）
+                elif name == "install_skill":
+                    result = runtime.install_skill(
+                        source_path=str(arguments.get("source_path") or ""),
+                        skill_name=str(arguments.get("skill_name") or ""),
+                    )
+                elif name == "list_installed_skills":
+                    result = runtime.list_installed_skills()
+                elif name == "uninstall_skill":
+                    result = runtime.uninstall_skill(
+                        skill_name=str(arguments.get("skill_name") or ""),
+                    )
+                elif name == "update_skill":
+                    result = runtime.update_skill(
+                        skill_name=str(arguments.get("skill_name") or ""),
+                        source_path=str(arguments.get("source_path") or ""),
+                    )
                 else:
                     result = {"error": f"unknown tool: {name}"}
 

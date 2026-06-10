@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
+import zipfile
 from typing import Any
 
 from utils.skill_agent_constants import ALLOWED_COMMANDS
@@ -324,3 +326,113 @@ class _AgentRuntime:
             "requested_name": workspace_relative_path,
             "overwrite": overwrite,
         }
+
+    # ==================== 技能管理方法 ====================
+
+    def install_skill(self, *, source_path: str, skill_name: str) -> dict[str, Any]:
+        """将 session_dir 下的目录或 zip 安装到 skills_root/<skill_name>/。"""
+        if not self.skills_root:
+            return {"error": "skills_root 未配置，无法安装技能。请确认插件包中存在 skills/ 目录或已设置 skills_root 参数/环境变量。"}
+        # 安全化 skill_name，防止路径穿越
+        safe_name = skill_name.replace("/", "").replace("\\", "").replace("..", "").strip()
+        if not safe_name:
+            return {"error": "skill_name 不能为空或包含非法字符", "skill_name": skill_name}
+        # 定位源文件（在 session_dir 下）
+        src = _safe_join(self.session_dir, source_path)
+        if not os.path.exists(src):
+            return {"error": "source_path 不存在", "source_path": source_path, "session_dir": self.session_dir}
+        dst = _safe_join(self.skills_root, safe_name)
+        # 如果目标已存在，先删除旧版本
+        if os.path.isdir(dst):
+            shutil.rmtree(dst, ignore_errors=True)
+        elif os.path.exists(dst):
+            os.remove(dst)
+        try:
+            if src.lower().endswith(".zip"):
+                # zip 文件：解压到目标目录
+                os.makedirs(dst, exist_ok=True)
+                with zipfile.ZipFile(src, "r") as zf:
+                    zf.extractall(dst)
+            else:
+                # 目录：直接复制
+                shutil.copytree(src, dst)
+        except Exception as e:
+            return {"error": f"安装失败: {str(e)}", "source": src, "destination": dst}
+        # 清除该技能的 metadata 缓存，使其立即可被 load_skills_index 发现
+        self._skill_metadata_cache.pop(safe_name, None)
+        # 验证安装结果
+        skill_md = os.path.join(dst, "SKILL.md")
+        has_skill_md = os.path.isfile(skill_md)
+        return {
+            "skill": safe_name,
+            "installed_to": dst,
+            "has_skill_md": has_skill_md,
+            "source_type": "zip" if src.lower().endswith(".zip") else "directory",
+        }
+
+    def list_installed_skills(self) -> dict[str, Any]:
+        """列出 skills_root 下所有已安装的技能。"""
+        if not self.skills_root:
+            return {"error": "skills_root 未配置", "skills": []}
+        skills: list[dict[str, Any]] = []
+        for folder in sorted(os.listdir(self.skills_root)):
+            path = os.path.join(self.skills_root, folder)
+            if not os.path.isdir(path):
+                continue
+            skill_md = os.path.join(path, "SKILL.md")
+            has_md = os.path.isfile(skill_md)
+            meta: dict[str, str] = {}
+            if has_md:
+                from utils.tools import _parse_frontmatter, _read_text
+                meta = _parse_frontmatter(_read_text(skill_md, 4000))
+            skills.append({
+                "name": meta.get("name") or folder,
+                "folder": folder,
+                "description": self._replace_template_vars(meta.get("description") or ""),
+                "has_skill_md": has_md,
+            })
+        return {
+            "root": self.skills_root,
+            "skills_count": len(skills),
+            "skills": skills,
+        }
+
+    def uninstall_skill(self, *, skill_name: str) -> dict[str, Any]:
+        """按名称从 skills_root 删除技能。"""
+        if not self.skills_root:
+            return {"error": "skills_root 未配置，无法删除技能。"}
+        safe_name = skill_name.replace("/", "").replace("\\", "").replace("..", "").strip()
+        if not safe_name:
+            return {"error": "skill_name 不能为空或包含非法字符", "skill_name": skill_name}
+        target = _safe_join(self.skills_root, safe_name)
+        if not os.path.isdir(target):
+            return {"error": "技能不存在", "skill_name": safe_name, "skills_root": self.skills_root}
+        try:
+            shutil.rmtree(target, ignore_errors=False)
+        except Exception as e:
+            return {"error": f"删除失败: {str(e)}", "skill_name": safe_name, "path": target}
+        # 清除缓存
+        self._skill_metadata_cache.pop(safe_name, None)
+        return {"skill": safe_name, "uninstalled": True, "path": target}
+
+    def update_skill(self, *, skill_name: str, source_path: str) -> dict[str, Any]:
+        """覆盖式更新技能：先删除旧版本，再从 source_path 重新安装。"""
+        if not self.skills_root:
+            return {"error": "skills_root 未配置，无法更新技能。"}
+        safe_name = skill_name.replace("/", "").replace("\\", "").replace("..", "").strip()
+        if not safe_name:
+            return {"error": "skill_name 不能为空或包含非法字符", "skill_name": skill_name}
+        target = _safe_join(self.skills_root, safe_name)
+        # 检查旧版本是否存在
+        if not os.path.isdir(target):
+            return {"error": f"技能 '{safe_name}' 不存在，无法更新。请先使用 install_skill 安装。", "skill_name": safe_name}
+        # 先删除
+        try:
+            shutil.rmtree(target, ignore_errors=False)
+        except Exception as e:
+            return {"error": f"删除旧版本失败: {str(e)}", "skill_name": safe_name}
+        # 再安装（复用 install_skill 的逻辑）
+        result = self.install_skill(source_path=source_path, skill_name=safe_name)
+        if result.get("error"):
+            return {**result, "note": "更新过程中删除了旧版本但新版本安装失败，当前处于未安装状态"}
+        return {**result, "updated": True}

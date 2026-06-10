@@ -145,6 +145,64 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             },
         },
     },
+    # --- 技能管理工具（安装/查看/删除/更新） ---
+    {
+        "type": "function",
+        "function": {
+            "name": "install_skill",
+            "description": (
+                "将 session_dir 下已解压的技能目录或 zip 压缩包安装到 skills_root，使其成为可用技能。"
+                "source_path 支持：已解压的目录路径（如 uploads/flow-assistant-skill-master）或 zip 文件路径。"
+                "skill_name 为安装后的技能名称（即 skills_root 下的子目录名）。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source_path": {"type": "string", "description": "session_dir 下待安装的目录或 zip 文件相对路径"},
+                    "skill_name": {"type": "string", "description": "安装后的技能名称（skills_root 下的子目录名）"},
+                },
+                "required": ["source_path", "skill_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_installed_skills",
+            "description": "列出 skills_root 下所有已安装的技能，包括名称、描述、是否有 SKILL.md 等信息。",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "uninstall_skill",
+            "description": "按技能名称从 skills_root 中删除已安装的技能。删除后该技能不再可用。",
+            "parameters": {
+                "type": "object",
+                "properties": {"skill_name": {"type": "string"}},
+                "required": ["skill_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_skill",
+            "description": (
+                "按技能名称用新的源文件覆盖更新已安装的技能。"
+                "先删除旧版本，再从 source_path（目录或 zip）重新安装。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "skill_name": {"type": "string", "description": "要更新的已有技能名称"},
+                    "source_path": {"type": "string", "description": "session_dir 下新的目录或 zip 文件相对路径"},
+                },
+                "required": ["skill_name", "source_path"],
+            },
+        },
+    },
 ]
 
 
@@ -179,6 +237,11 @@ def _validate_tool_arguments(tool_name: str, arguments: Any) -> tuple[bool, str]
         "list_temp_files": [],
         "run_temp_command": ["command"],
         "export_temp_file": ["temp_relative_path", "workspace_relative_path"],
+        # 技能管理工具
+        "install_skill": ["source_path", "skill_name"],
+        "list_installed_skills": [],
+        "uninstall_skill": ["skill_name"],
+        "update_skill": ["skill_name", "source_path"],
     }
 
     if tool_name not in required:
