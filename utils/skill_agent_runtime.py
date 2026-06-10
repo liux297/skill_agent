@@ -220,6 +220,10 @@ class _AgentRuntime:
             )
             stdout = result.stdout.strip()
             stderr = result.stderr.strip()
+            # 截断过长的 stdout，避免 LLM 上下文溢出
+            MAX_STDOUT_CHARS = 30000
+            if len(stdout) > MAX_STDOUT_CHARS:
+                stdout = stdout[:MAX_STDOUT_CHARS] + f"\n... [截断，原始输出共 {len(stdout)} 字符]"
             # 当 stdout 为空时，补充诊断信息帮助 LLM 定位问题
             if not stdout:
                 diag_parts = [f"returncode={result.returncode}"]

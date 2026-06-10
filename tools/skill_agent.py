@@ -473,8 +473,15 @@ class SkillAgentTool(Tool):
             def should_emit_user_text(text: str) -> bool:
                 if not text:
                     return False
-                # 仅检测完整 JSON 协议响应并抑制展示，不再抑制以 { 或 ``` 开头的部分文本
-                # 这样可以避免 LLM 输出中的代码块、花括号开头的内容等被错误截断
+                s = str(text)
+                stripped = s.lstrip()
+                # 以 { 开头但尚未形成完整 JSON，暂不输出（等待更多数据）
+                if stripped.startswith("{") and _extract_first_json_object(s) is None:
+                    return False
+                # 以 ``` 开头但代码块未闭合，暂不输出
+                if stripped.startswith("```") and stripped.count("```") < 2:
+                    return False
+                # 检测完整 JSON 协议响应并抑制展示
                 json_text = _extract_first_json_object(text)
                 if not json_text:
                     return True
