@@ -470,6 +470,9 @@ class SkillAgentTool(Tool):
                     yield self.create_text_message(tagged[i : i + step])
                     streamed_any = True
             
+            # "TOOL_RESULT" 的所有前缀（从4字符开始），用于流式输出时检测部分匹配
+            _TOOL_RESULT_PREFIXES = tuple("TOOL_RESULT"[:i] for i in range(4, len("TOOL_RESULT") + 1))
+
             def should_emit_user_text(text: str) -> bool:
                 if not text:
                     return False
@@ -481,8 +484,8 @@ class SkillAgentTool(Tool):
                 # 以 ``` 开头但代码块未闭合，暂不输出
                 if stripped.startswith("```") and stripped.count("```") < 2:
                     return False
-                # TOOL_RESULT 是内部协议格式，不应展示给用户
-                if stripped.startswith("TOOL_RESULT"):
+                # TOOL_RESULT 及其部分前缀（TOOL、TOOL_、TOOL_R 等）是内部协议，不应展示
+                if stripped.startswith(_TOOL_RESULT_PREFIXES):
                     return False
                 # 检测完整 JSON 协议响应并抑制展示
                 json_text = _extract_first_json_object(text)
@@ -506,10 +509,15 @@ class SkillAgentTool(Tool):
                 """流式输出时，计算可安全输出的文本长度。
                 自然语言部分即时输出，遇到可能的 JSON 协议时截断等待。
                 """
-                # TOOL_RESULT 是内部协议，不应流式输出
+                # TOOL_RESULT 完整匹配
                 tr_pos = text.find("TOOL_RESULT")
                 if tr_pos >= 0:
                     return tr_pos
+                # TOOL_RESULT 部分前缀匹配（如 "TOOL"、"TOOL_R" 等）
+                # 防止流式输出时 "TOOL" 被提前展示给用户
+                for prefix in _TOOL_RESULT_PREFIXES:
+                    if text.endswith(prefix):
+                        return len(text) - len(prefix)
                 brace_pos = text.find("{")
                 if brace_pos < 0:
                     return len(text)
@@ -517,7 +525,6 @@ class SkillAgentTool(Tool):
                 if brace_pos > 0:
                     return brace_pos
                 # 文本以 { 开头，should_emit_user_text 会处理延迟逻辑
-                # 这里返回 0，让 should_emit_user_text 判断是否输出
                 return 0
 
             try:
@@ -881,6 +888,17 @@ class SkillAgentTool(Tool):
                     messages.append(
                         UserPromptMessage(
                             content="你刚才输出了工具执行结果，但这不是你的回答。请继续完成任务：如果需要调用工具请输出 JSON，否则输出最终回答。"
+                        )
+                    )
+                    continue
+
+                # 检测不完整的 TOOL_RESULT 输出（如 "TOOL"、"TOOL_RESULT" 但无后续 JSON）
+                # LLM 可能输出了 TOOL_RESULT 的部分前缀就停止了，应提示继续
+                if res_text and res_text.lstrip().startswith(_TOOL_RESULT_PREFIXES):
+                    _dbg(f"incomplete_tool_output detected: {_shorten_text(res_text, 100)}, prompting continuation")
+                    messages.append(
+                        UserPromptMessage(
+                            content="你刚才的输出不完整。请继续完成任务：如果需要调用工具请输出完整 JSON，否则请直接输出最终回答。"
                         )
                     )
                     continue
