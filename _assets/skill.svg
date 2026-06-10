@@ -1,85 +1,58 @@
 <svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="bg" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#6C5CE7"/>
       <stop offset="50%" stop-color="#8E44AD"/>
       <stop offset="100%" stop-color="#0984E3"/>
     </linearGradient>
-    <linearGradient id="cardGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#FFFFFF"/>
-      <stop offset="100%" stop-color="#F2F0FF"/>
-    </linearGradient>
-    <linearGradient id="shine" x1="0" y1="0" x2="55" y2="55" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="rgba(255,255,255,0.22)"/>
+    <linearGradient id="shine" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="rgba(255,255,255,0.18)"/>
       <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+    </linearGradient>
+    <linearGradient id="textGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#E8E4FF"/>
     </linearGradient>
   </defs>
 
-  <!-- 背景 -->
+  <!-- 圆角背景 -->
   <rect width="100" height="100" rx="24" fill="url(#bg)"/>
+  <!-- 高光层 -->
+  <rect x="4" y="4" width="92" height="92" rx="20" fill="url(#shine)"/>
 
-  <!-- 高光 -->
-  <rect x="4" y="4" width="92" height="92" rx="20" fill="url(#shine)" pointer-events="none"/>
+  <!-- 外圈装饰轨道 -->
+  <circle cx="50" cy="50" r="42" stroke="rgba(255,255,255,0.08)" stroke-width="1.2" stroke-dasharray="6 4" fill="none"/>
 
-  <g transform="translate(50, 48)">
-    <!-- 外圈轨道 -->
-    <circle cx="0" cy="-4" r="36" stroke="rgba(255,255,255,0.08)" stroke-width="1.2" stroke-dasharray="6 4" fill="none"/>
+  <!-- SKILL 主文字 -->
+  <text x="50" y="58" font-size="30" font-weight="bold" fill="url(#textGrad)" font-family="Arial,Helvetica,sans-serif" text-anchor="middle" letter-spacing="4">SKILL</text>
 
-    <!-- ========== 核心：SKILL 文档卡片 ========== -->
-    <g transform="translate(0, -5)">
-      <!-- 卡片主体 -->
-      <rect x="-18" y="-24" width="36" height="46" rx="7"
-            fill="url(#cardGrad)" stroke="rgba(255,255,255,0.35)" stroke-width="1.2"/>
+  <!-- 文字下方装饰线 -->
+  <rect x="22" y="64" width="56" height="2.5" rx="1.2" fill="rgba(255,255,255,0.3)"/>
 
-      <!-- 顶部色条 - Skill 标识 -->
-      <rect x="-14" y="-20" width="26" height="4.5" rx="2.2" fill="#6C5CE7" opacity="0.85"/>
-      <!-- 色条上小圆点 = 活跃状态指示 -->
-      <circle cx="9" cy="-17.75" r="1.8" fill="white" opacity="0.85"/>
+  <!-- 左上角：闪电图标 = 工具执行能力 -->
+  <g transform="translate(22, 28)">
+    <circle r="8" fill="rgba(255,255,255,0.15)"/>
+    <path d="M2 -5 L-2 0.5 L1 0.5 L-1 5 L3 -0.5 L0 -0.5 Z" fill="white" opacity="0.9"/>
+  </g>
 
-      <!-- 标题行 -->
-      <rect x="-12" y="-12" width="16" height="3" rx="1.5" fill="#A29BFE"/>
-      <!-- 副标题行 -->
-      <rect x="-12" y="-6.5" width="22" height="2.2" rx="1.1" fill="#D4D0F0"/>
+  <!-- 右上角：齿轮图标 = 技能配置 -->
+  <g transform="translate(78, 28)">
+    <circle r="8" fill="rgba(255,255,255,0.15)"/>
+    <circle cx="0" cy="0" r="3" stroke="white" stroke-width="1.5" fill="none" opacity="0.9"/>
+    <path d="M0 -5 L0 -3.5 M0 3.5 L0 5 M-5 0 L-3.5 0 M3.5 0 L5 0" stroke="white" stroke-width="1.3" stroke-linecap="round" opacity="0.9"/>
+  </g>
 
-      <!-- 内容段落线 -->
-      <line x1="-12" y1="1.5" x2="11" y2="1.5" stroke="#C8C4E8" stroke-width="2" stroke-linecap="round"/>
-      <line x1="-12" y1="6.5" x2="7" y2="6.5" stroke="#D4D0F0" stroke-width="2" stroke-linecap="round"/>
-      <line x1="-12" y1="11.5" x2="3" y2="11.5" stroke="#E8E6FA" stroke-width="1.6" stroke-linecap="round"/>
+  <!-- 左下角：列表图标 = 技能管理 -->
+  <g transform="translate(22, 78)">
+    <circle r="7" fill="rgba(255,255,255,0.12)"/>
+    <line x1="-3" y1="-2.5" x2="3" y2="-2.5" stroke="white" stroke-width="1.4" stroke-linecap="round" opacity="0.85"/>
+    <line x1="-3" y1="0" x2="3" y2="0" stroke="white" stroke-width="1.4" stroke-linecap="round" opacity="0.7"/>
+    <line x1="-3" y1="2.5" x2="1" y2="2.5" stroke="white" stroke-width="1.4" stroke-linecap="round" opacity="0.55"/>
+  </g>
 
-      <!-- 右下角 SKILL 角标 -->
-      <path d="M10 16 L18 16 L18 25 L13.5 21 L10 25 Z" fill="#0984E3" opacity="0.88"/>
-      <text x="13" y="21.8" font-size="5.5" font-weight="bold" fill="white" font-family="Arial,sans-serif">S</text>
-    </g>
-
-    <!-- ========== 左侧：安装/添加技能节点 ========== -->
-    <g transform="translate(-27, 12)">
-      <circle r="10" fill="white" opacity="0.96" filter="drop-shadow(0 2px 3px rgba(0,0,0,0.1))"/>
-      <!-- 下载箭头 + 加号 = install_skill -->
-      <path d="M0 -5 L0 3.5 M-4 0 L4 0" stroke="#6C5CE7" stroke-width="2.2" stroke-linecap="round"/>
-      <path d="M-3 0.5 L0 5 L3 0.5" stroke="#6C5CE7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-    </g>
-
-    <!-- ========== 右上：工具执行技能节点 ========== -->
-    <g transform="translate(25, -13)">
-      <circle r="9.5" fill="white" opacity="0.94" filter="drop-shadow(0 2px 3px rgba(0,0,0,0.08))"/>
-      <!-- 齿轮 + 闪电 = 工具能力 -->
-      <circle cx="0" cy="0" r="4" stroke="#0984E3" stroke-width="1.8" fill="none"/>
-      <path d="M0 -5.5 L0 -4 M0 4 L0 5.5 M-5.5 0 L-4 0 M4 0 L5.5 0" stroke="#0984E3" stroke-width="1.5" stroke-linecap="round"/>
-      <path d="M2.5 -2 L5 0.5 L2.5 3" stroke="#6C5CE7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-    </g>
-
-    <!-- ========== 右下：列表查看节点 ========== -->
-    <g transform="translate(23, 19)">
-      <circle r="8.5" fill="white" opacity="0.92" filter="drop-shadow(0 2px 3px rgba(0,0,0,0.06))"/>
-      <!-- 列表 = list_installed_skills / uninstall / update -->
-      <line x1="-3.5" y1="-3" x2="3.5" y2="-3" stroke="#0984E3" stroke-width="1.7" stroke-linecap="round"/>
-      <line x1="-3.5" y1="0" x2="3.5" y2="0" stroke="#A29BFE" stroke-width="1.7" stroke-linecap="round"/>
-      <line x1="-3.5" y1="3" x2="1.5" y2="3" stroke="#C8C4E8" stroke-width="1.7" stroke-linecap="round"/>
-    </g>
-
-    <!-- 连接线 -->
-    <path d="M-17 10 Q-24 12 -25 14" stroke="rgba(255,255,255,0.32)" stroke-width="1.3" fill="none" stroke-dasharray="3 2"/>
-    <path d="M17 -10 Q22 -12 23 -12" stroke="rgba(255,255,255,0.32)" stroke-width="1.3" fill="none" stroke-dasharray="3 2"/>
-    <path d="M15 16 Q19 18 21 19" stroke="rgba(255,255,255,0.32)" stroke-width="1.3" fill="none" stroke-dasharray="3 2"/>
+  <!-- 右下角：加号图标 = 安装技能 -->
+  <g transform="translate(78, 78)">
+    <circle r="7" fill="rgba(255,255,255,0.12)"/>
+    <path d="M0 -3.5 L0 3.5 M-3.5 0 L3.5 0" stroke="white" stroke-width="1.8" stroke-linecap="round" opacity="0.85"/>
   </g>
 </svg>

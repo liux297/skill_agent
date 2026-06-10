@@ -1,72 +1,14 @@
-<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="bg" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#6C5CE7"/>
       <stop offset="100%" stop-color="#0984E3"/>
     </linearGradient>
-    <linearGradient id="cardGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="white"/>
-      <stop offset="100%" stop-color="#F0EEFF"/>
-    </linearGradient>
   </defs>
-
   <!-- 圆角背景 -->
-  <rect width="100" height="100" rx="22" fill="url(#bgGrad)"/>
-
-  <g transform="translate(50, 50)">
-    <!-- ====== 核心：SKILL 卡片 ====== -->
-    <g transform="translate(0, -4)">
-      <!-- 主卡片 - 代表 Skill/SKILL.md -->
-      <rect x="-16" y="-22" width="32" height="40" rx="6" fill="url(#cardGrad)" stroke="rgba(255,255,255,0.3)" stroke-width="1"/>
-
-      <!-- 卡片顶部色条 - 标识这是 Skill 文档 -->
-      <rect x="-12" y="-18" width="24" height="4" rx="2" fill="#6C5CE7" opacity="0.8"/>
-
-      <!-- 卡片内容行：标题 -->
-      <rect x="-10" y="-10" width="14" height="2.5" rx="1.2" fill="#A29BFE" opacity="0.9"/>
-      <rect x="-10" y="-5" width="20" height="2" rx="1" fill="#D4D0F0" opacity="0.8"/>
-
-      <!-- 卡片内容行：描述文字 -->
-      <line x1="-10" y1="2" x2="10" y2="2" stroke="#C8C4E8" stroke-width="1.8" stroke-linecap="round"/>
-      <line x1="-10" y1="7" x2="6" y2="7" stroke="#D4D0F0" stroke-width="1.8" stroke-linecap="round"/>
-
-      <!-- 右下角 SKILL 标签角标 -->
-      <path d="M8 14 L16 14 L16 22 L12 18 L8 22 Z" fill="#0984E3" opacity="0.85"/>
-      <text x="11" y="19.5" font-size="5" font-weight="bold" fill="white" font-family="Arial,sans-serif">S</text>
-    </g>
-
-    <!-- ====== 左侧：安装/添加技能图标 ====== -->
-    <g transform="translate(-25, 10)">
-      <circle r="9" fill="white" opacity="0.95"/>
-      <!-- 向下箭头 + 加号 = 安装/添加 -->
-      <path d="M0 -4 L0 3 M-3.5 0 L3.5 0" stroke="#6C5CE7" stroke-width="2" stroke-linecap="round"/>
-      <path d="M-2.5 1 L0 4 L2.5 1" stroke="#6C5CE7" stroke-width="1.8" stroke-linecap="round" fill="none"/>
-    </g>
-
-    <!-- ====== 右上：齿轮/工具技能图标 ====== -->
-    <g transform="translate(23, -12)">
-      <circle r="8.5" fill="white" opacity="0.92"/>
-      <!-- 齿轮 + 闪电 = 工具执行能力 -->
-      <circle cx="0" cy="0" r="3.5" stroke="#0984E3" stroke-width="1.6" fill="none"/>
-      <path d="M0 -5 L0 -3.5 M0 3.5 L0 5 M-5 0 L-3.5 0 M3.5 0 L5 0" stroke="#0984E3" stroke-width="1.4" stroke-linecap="round"/>
-      <path d="M2 -2 L4 0 L2 2" stroke="#6C5CE7" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-    </g>
-
-    <!-- ====== 右下：列表/查看技能图标 ====== -->
-    <g transform="translate(21, 17)">
-      <circle r="7.5" fill="white" opacity="0.9"/>
-      <!-- 列表线条 = 已安装技能列表 -->
-      <line x1="-3" y1="-2.5" x2="3" y2="-2.5" stroke="#0984E3" stroke-width="1.5" stroke-linecap="round"/>
-      <line x1="-3" y1="0" x2="3" y2="0" stroke="#A29BFE" stroke-width="1.5" stroke-linecap="round"/>
-      <line x1="-3" y1="2.5" x2="1.5" y2="2.5" stroke="#C8C4E8" stroke-width="1.5" stroke-linecap="round"/>
-    </g>
-
-    <!-- ====== 连接线：从中心卡片到各功能节点 ====== -->
-    <path d="M-15 8 Q-22 10 -22 13" stroke="rgba(255,255,255,0.35)" stroke-width="1.2" fill="none" stroke-dasharray="3 2"/>
-    <path d="M15 -8 Q20 -10 21 -10" stroke="rgba(255,255,255,0.35)" stroke-width="1.2" fill="none" stroke-dasharray="3 2"/>
-    <path d="M14 14 Q18 16 19 17" stroke="rgba(255,255,255,0.35)" stroke-width="1.2" fill="none" stroke-dasharray="3 2"/>
-
-    <!-- ====== 外圈轨道 ====== -->
-    <circle cx="0" cy="-4" r="34" stroke="rgba(255,255,255,0.1)" stroke-width="1" stroke-dasharray="5 4" fill="none"/>
-  </g>
+  <rect width="40" height="40" rx="8" fill="url(#bg)"/>
+  <!-- SKILL 文字 -->
+  <text x="20" y="25" font-size="11" font-weight="bold" fill="white" font-family="Arial,Helvetica,sans-serif" text-anchor="middle" letter-spacing="1.5">SKILL</text>
+  <!-- 底部装饰线 -->
+  <rect x="8" y="28" width="24" height="2" rx="1" fill="rgba(255,255,255,0.35)"/>
 </svg>
