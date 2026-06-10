@@ -448,6 +448,9 @@ class SkillAgentTool(Tool):
                     continue
             return saved
 
+        # "TOOL_RESULT" 的所有前缀（从4字符开始），用于流式输出时检测部分匹配
+        _TOOL_RESULT_PREFIXES = tuple("TOOL_RESULT"[:i] for i in range(4, len("TOOL_RESULT") + 1))
+
         def invoke_llm_live(
             *, prompt_messages: list[Any], tools: list[Any] | None
         ) -> Generator[ToolInvokeMessage, None, tuple[str, list[Any], Any, int, bool]]:
@@ -476,8 +479,8 @@ class SkillAgentTool(Tool):
                     return False
                 s = str(text)
                 stripped = s.lstrip()
-                # TOOL_RESULT 是内部协议标记，不应展示给用户
-                if stripped.startswith("TOOL_RESULT"):
+                # TOOL_RESULT 及其部分前缀（TOOL、TOOL_、TOOL_R 等）是内部协议，不应展示
+                if stripped.startswith(_TOOL_RESULT_PREFIXES):
                     return False
                 # 以 { 开头但尚未形成完整 JSON，暂不输出（等待更多数据）
                 if stripped.startswith("{") and _extract_first_json_object(s) is None:
@@ -502,6 +505,27 @@ class SkillAgentTool(Tool):
                 if "name" in obj and "result" in obj and "type" not in obj:
                     return False
                 return True
+
+            def _safe_stream_boundary(text: str) -> int:
+                """流式输出时，计算可安全输出的文本长度。
+                自然语言部分即时输出，遇到可能的 JSON 协议时截断等待。
+                """
+                # TOOL_RESULT 完整匹配
+                tr_pos = text.find("TOOL_RESULT")
+                if tr_pos >= 0:
+                    return tr_pos
+                # TOOL_RESULT 部分前缀匹配（如 "TOOL"、"TOOL_R" 等）
+                for prefix in _TOOL_RESULT_PREFIXES:
+                    if text.endswith(prefix):
+                        return len(text) - len(prefix)
+                brace_pos = text.find("{")
+                if brace_pos < 0:
+                    return len(text)
+                # { 之前有自然语言内容，先输出这些
+                if brace_pos > 0:
+                    return brace_pos
+                # 文本以 { 开头，should_emit_user_text 会处理延迟逻辑
+                return 0
 
             try:
                 try:
@@ -552,17 +576,21 @@ class SkillAgentTool(Tool):
                     if t:
                         text_parts.append(t)
                         combined_text_live = "".join(text_parts).strip()
-                        if combined_text_live and not saw_tool_calls and should_emit_user_text(combined_text_live):
-                            if not emitted_prefix:
-                                yield self.create_text_message("\n【🤖Skill_Agent】\n")
-                                emitted_prefix = True
-                            new = combined_text_live[emitted_len:]
-                            if new:
-                                step = max(1, int(typing_chunk))
-                                for i in range(0, len(new), step):
-                                    yield self.create_text_message(new[i : i + step])
-                                    streamed_any = True
-                                emitted_len = len(combined_text_live)
+                        if combined_text_live and not saw_tool_calls:
+                            # 计算可安全流式输出的文本边界（JSON/TOOL_RESULT 之前的自然语言部分）
+                            safe_len = _safe_stream_boundary(combined_text_live)
+                            safe_text = combined_text_live[:safe_len] if safe_len > 0 else combined_text_live
+                            if safe_text and should_emit_user_text(safe_text):
+                                if not emitted_prefix:
+                                    yield self.create_text_message("\n【🤖Skill_Agent】\n")
+                                    emitted_prefix = True
+                                new = safe_text[emitted_len:]
+                                if new:
+                                    step = max(1, int(typing_chunk))
+                                    for i in range(0, len(new), step):
+                                        yield self.create_text_message(new[i : i + step])
+                                        streamed_any = True
+                                emitted_len = len(safe_text)
                 combined_text = "".join(text_parts).strip()
                 if emitted_prefix:
                     yield self.create_text_message("\n\n")
@@ -873,6 +901,17 @@ class SkillAgentTool(Tool):
                 # 超过重试次数，将回声内容当作最终文本（避免无限循环）
                 if is_tool_result_echo:
                     _dbg(f"tool_result_echo max retries reached, treating as final text")
+
+                # 检测不完整的 TOOL_RESULT 输出（如 "TOOL"、"TOOL_R" 等部分前缀但无后续 JSON）
+                if res_text and res_text.lstrip().startswith(_TOOL_RESULT_PREFIXES) and tool_result_echo_count < 2:
+                    tool_result_echo_count += 1
+                    _dbg(f"incomplete_tool_output detected: {_shorten_text(res_text, 100)}, prompting continuation")
+                    messages.append(
+                        UserPromptMessage(
+                            content="你刚才的输出不完整。请继续完成任务：如果需要调用工具请输出完整 JSON，否则请直接输出最终回答。"
+                        )
+                    )
+                    continue
 
                 if not res_text and not action and not nontext:
                     empty_responses += 1
