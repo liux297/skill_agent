@@ -447,9 +447,6 @@ class SkillAgentTool(Tool):
                     continue
             return saved
 
-        # "TOOL_RESULT" 的所有前缀（从4字符开始），用于流式输出时检测部分匹配
-        _TOOL_RESULT_PREFIXES = tuple("TOOL_RESULT"[:i] for i in range(4, len("TOOL_RESULT") + 1))
-
         def invoke_llm_live(
             *, prompt_messages: list[Any], tools: list[Any] | None
         ) -> Generator[ToolInvokeMessage, None, tuple[str, list[Any], Any, int, bool]]:
@@ -476,18 +473,8 @@ class SkillAgentTool(Tool):
             def should_emit_user_text(text: str) -> bool:
                 if not text:
                     return False
-                s = str(text)
-                stripped = s.lstrip()
-                # 以 { 开头但尚未形成完整 JSON，暂不输出（等待更多数据）
-                if stripped.startswith("{") and _extract_first_json_object(s) is None:
-                    return False
-                # 以 ``` 开头但代码块未闭合，暂不输出
-                if stripped.startswith("```") and stripped.count("```") < 2:
-                    return False
-                # TOOL_RESULT 及其部分前缀（TOOL、TOOL_、TOOL_R 等）是内部协议，不应展示
-                if stripped.startswith(_TOOL_RESULT_PREFIXES):
-                    return False
-                # 检测完整 JSON 协议响应并抑制展示
+                # 仅检测完整 JSON 协议响应并抑制展示，不再抑制以 { 或 ``` 开头的部分文本
+                # 这样可以避免 LLM 输出中的代码块、花括号开头的内容等被错误截断
                 json_text = _extract_first_json_object(text)
                 if not json_text:
                     return True
@@ -498,34 +485,7 @@ class SkillAgentTool(Tool):
                 if not isinstance(obj, dict):
                     return True
                 t = obj.get("type")
-                if t in ("tool", "final"):
-                    return False
-                # TOOL_RESULT 回声格式：有 name+result 但无 type
-                if "name" in obj and "result" in obj and "type" not in obj:
-                    return False
-                return True
-
-            def _safe_stream_boundary(text: str) -> int:
-                """流式输出时，计算可安全输出的文本长度。
-                自然语言部分即时输出，遇到可能的 JSON 协议时截断等待。
-                """
-                # TOOL_RESULT 完整匹配
-                tr_pos = text.find("TOOL_RESULT")
-                if tr_pos >= 0:
-                    return tr_pos
-                # TOOL_RESULT 部分前缀匹配（如 "TOOL"、"TOOL_R" 等）
-                # 防止流式输出时 "TOOL" 被提前展示给用户
-                for prefix in _TOOL_RESULT_PREFIXES:
-                    if text.endswith(prefix):
-                        return len(text) - len(prefix)
-                brace_pos = text.find("{")
-                if brace_pos < 0:
-                    return len(text)
-                # { 之前有自然语言内容，先输出这些
-                if brace_pos > 0:
-                    return brace_pos
-                # 文本以 { 开头，should_emit_user_text 会处理延迟逻辑
-                return 0
+                return t not in {"tool", "final"}
 
             try:
                 try:
@@ -576,21 +536,17 @@ class SkillAgentTool(Tool):
                     if t:
                         text_parts.append(t)
                         combined_text_live = "".join(text_parts).strip()
-                        if combined_text_live and not saw_tool_calls:
-                            # 计算可安全流式输出的文本边界（JSON/TOOL_RESULT 之前的自然语言部分）
-                            safe_len = _safe_stream_boundary(combined_text_live)
-                            safe_text = combined_text_live[:safe_len] if safe_len > 0 else combined_text_live
-                            if safe_text and should_emit_user_text(safe_text):
-                                if not emitted_prefix:
-                                    yield self.create_text_message("\n【🤖Skill_Agent】\n")
-                                    emitted_prefix = True
-                                new = safe_text[emitted_len:]
-                                if new:
-                                    step = max(1, int(typing_chunk))
-                                    for i in range(0, len(new), step):
-                                        yield self.create_text_message(new[i : i + step])
-                                        streamed_any = True
-                                emitted_len = len(safe_text)
+                        if combined_text_live and not saw_tool_calls and should_emit_user_text(combined_text_live):
+                            if not emitted_prefix:
+                                yield self.create_text_message("\n【🤖Skill_Agent】\n")
+                                emitted_prefix = True
+                            new = combined_text_live[emitted_len:]
+                            if new:
+                                step = max(1, int(typing_chunk))
+                                for i in range(0, len(new), step):
+                                    yield self.create_text_message(new[i : i + step])
+                                    streamed_any = True
+                                emitted_len = len(combined_text_live)
                 combined_text = "".join(text_parts).strip()
                 if emitted_prefix:
                     yield self.create_text_message("\n\n")
