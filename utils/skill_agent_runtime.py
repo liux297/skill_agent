@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from typing import Any
@@ -39,6 +40,26 @@ class _AgentRuntime:
         self._skill_metadata_cache: dict[str, dict[str, Any]] = {}
         self._skill_files_listed: set[str] = set()
 
+    def _replace_template_vars(self, text: str) -> str:
+        """将文本中 ${xxx} 格式的占位符替换为 custom_variables 中对应字段的值。"""
+        if not self.custom_variables or not text:
+            return text
+
+        def _replacer(match: re.Match) -> str:
+            key = match.group(1)
+            return str(self.custom_variables.get(key, match.group(0)))
+
+        return re.sub(r"\$\{(\w+)\}", _replacer, text)
+
+    def _build_subprocess_env(self) -> dict[str, str]:
+        """构建子进程环境变量，将 custom_variables 注入为环境变量。"""
+        env = dict(os.environ)
+        for key, value in self.custom_variables.items():
+            # 将变量名转为大写并替换 - 为 _，如 iv-user → IV_USER
+            env_key = key.upper().replace("-", "_")
+            env[env_key] = str(value)
+        return env
+
     def has_skill_metadata(self, skill_name: str) -> bool:
         cached = self._skill_metadata_cache.get(skill_name)
         return bool(isinstance(cached, dict) and cached.get("skill") == skill_name)
@@ -54,12 +75,12 @@ class _AgentRuntime:
             skill_md = os.path.join(path, "SKILL.md")
             meta: dict[str, str] = {}
             if os.path.isfile(skill_md):
-                meta = _parse_frontmatter(_read_text(skill_md, 4000))
+                meta = _parse_frontmatter(self._replace_template_vars(_read_text(skill_md, 4000)))
             skills.append(
                 {
                     "name": meta.get("name") or folder,
                     "folder": folder,
-                    "description": meta.get("description") or "",
+                    "description": self._replace_template_vars(meta.get("description") or ""),
                 }
             )
         return {"root": self.skills_root, "skills": skills}
@@ -71,7 +92,7 @@ class _AgentRuntime:
         skill_md = os.path.join(path, "SKILL.md")
         if not os.path.isfile(skill_md):
             return {"error": "SKILL.md not found", "skill": skill_name}
-        content = _read_text(skill_md, 12000)
+        content = self._replace_template_vars(_read_text(skill_md, 12000))
         meta = _parse_frontmatter(content)
         self._skill_metadata_cache[skill_name] = {"skill": skill_name, "metadata": meta}
         return {"skill": skill_name, "metadata": meta, "skill_md": content}
@@ -93,7 +114,7 @@ class _AgentRuntime:
         file_path = _safe_join(skill_path, relative_path)
         if not os.path.isfile(file_path):
             return {"error": "file not found", "path": relative_path}
-        return {"path": file_path, "content": _read_text(file_path, max_chars)}
+        return {"path": file_path, "content": self._replace_template_vars(_read_text(file_path, max_chars))}
 
     def write_temp_file(self, relative_path: str, content: str) -> dict[str, Any]:
         os.makedirs(self.session_dir, exist_ok=True)
@@ -184,6 +205,7 @@ class _AgentRuntime:
         command = _rewrite_existing_session_files_to_abs(command, session_dir=self.session_dir)
         command = _rewrite_out_arg_to_session_dir(command, session_dir=self.session_dir)
         cwd = skill_path if not cwd_relative else _safe_join(skill_path, cwd_relative)
+        env = self._build_subprocess_env()
         try:
             result = subprocess.run(
                 command,
@@ -192,8 +214,25 @@ class _AgentRuntime:
                 text=True,
                 encoding="utf-8",
                 errors="ignore",
+                env=env,
             )
-            return {"returncode": result.returncode, "stdout": result.stdout.strip(), "stderr": result.stderr.strip()}
+            stdout = result.stdout.strip()
+            stderr = result.stderr.strip()
+            # 当 stdout 为空时，补充诊断信息帮助 LLM 定位问题
+            if not stdout:
+                diag_parts = [f"returncode={result.returncode}"]
+                if stderr:
+                    diag_parts.append(f"stderr={stderr}")
+                else:
+                    diag_parts.append("(stderr also empty)")
+                diag_parts.append(f"command={' '.join(command)}")
+                return {
+                    "returncode": result.returncode,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "_diagnostic": " | ".join(diag_parts),
+                }
+            return {"returncode": result.returncode, "stdout": stdout, "stderr": stderr}
         except FileNotFoundError as e:
             return {"error": "executable_not_found", "exe": str(command[0] or exe), "exception": str(e)}
         except Exception as e:
@@ -225,6 +264,7 @@ class _AgentRuntime:
         command = _rewrite_existing_session_files_to_abs(command, session_dir=self.session_dir)
         os.makedirs(self.session_dir, exist_ok=True)
         cwd = self.session_dir if not cwd_relative else _safe_join(self.session_dir, cwd_relative)
+        env = self._build_subprocess_env()
         try:
             result = subprocess.run(
                 command,
@@ -233,8 +273,25 @@ class _AgentRuntime:
                 text=True,
                 encoding="utf-8",
                 errors="ignore",
+                env=env,
             )
-            return {"returncode": result.returncode, "stdout": result.stdout.strip(), "stderr": result.stderr.strip()}
+            stdout = result.stdout.strip()
+            stderr = result.stderr.strip()
+            # 当 stdout 为空时，补充诊断信息帮助 LLM 定位问题
+            if not stdout:
+                diag_parts = [f"returncode={result.returncode}"]
+                if stderr:
+                    diag_parts.append(f"stderr={stderr}")
+                else:
+                    diag_parts.append("(stderr also empty)")
+                diag_parts.append(f"command={' '.join(command)}")
+                return {
+                    "returncode": result.returncode,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "_diagnostic": " | ".join(diag_parts),
+                }
+            return {"returncode": result.returncode, "stdout": stdout, "stderr": stderr}
         except FileNotFoundError as e:
             return {"error": "executable_not_found", "exe": str(command[0] or exe), "exception": str(e)}
         except Exception as e:

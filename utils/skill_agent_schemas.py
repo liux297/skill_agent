@@ -148,9 +148,25 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 ]
 
 
+def _coerce_command_to_list(arguments: dict) -> dict:
+    """如果 command 是字符串，自动拆分为数组，并清理参数中 LLM 从 Markdown 复制时带入的反引号。"""
+    cmd = arguments.get("command")
+    if isinstance(cmd, str) and cmd.strip():
+        import shlex
+        arguments["command"] = shlex.split(cmd.strip())
+    # 清理每个参数首尾的反引号（LLM 从 Markdown 代码块复制命令时容易带入）
+    cmd_list = arguments.get("command")
+    if isinstance(cmd_list, list):
+        arguments["command"] = [arg.strip("`") for arg in cmd_list]
+    return arguments
+
+
 def _validate_tool_arguments(tool_name: str, arguments: Any) -> tuple[bool, str]:
     if not isinstance(arguments, dict):
         return False, "arguments 必须是对象(dict)"
+
+    # 自动将字符串 command 转为数组
+    arguments = _coerce_command_to_list(arguments)
 
     required: dict[str, list[str]] = {
         "get_skill_metadata": ["skill_name"],

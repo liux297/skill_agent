@@ -30,7 +30,7 @@ from utils.skill_agent_constants import HISTORY_TRANSCRIPT_MAX_CHARS
 from utils.skill_agent_debug import _dbg, _model_brief
 from utils.skill_agent_exec import _cleanup_old_temp_sessions, _detect_skills_root
 from utils.skill_agent_runtime import _AgentRuntime
-from utils.skill_agent_schemas import TOOL_SCHEMAS, _tool_call_retry_prompt, _validate_tool_arguments
+from utils.skill_agent_schemas import TOOL_SCHEMAS, _coerce_command_to_list, _tool_call_retry_prompt, _validate_tool_arguments
 from utils.skill_agent_storage import (
     _append_history_turn,
     _get_history_storage_key,
@@ -252,10 +252,10 @@ class SkillAgentTool(Tool):
             + "1) 只根据技能元数据（name/description）判断可能相关的技能\n"
             + "2) 触发时才调用 get_skill_metadata 读取 SKILL.md（说明文档）\n"
             + "3) 任何对技能的进一步操作（list_skill_files/read_skill_file/run_skill_command）之前，必须先 get_skill_metadata；若未执行，本系统会拒绝该调用并要求你先补读说明书。\n"
-            + "4) 按说明书内容执行脚本/命令，或进一步搜索资料前，必须先调用 list_skill_files 查看技能包的目录结构，以确保在正确的目录执行命令。\n"
+            + "4) 如果 SKILL.md 中已经明确给出了要执行的脚本路径和参数格式，你可以直接调用 run_skill_command 执行，无需再 list_skill_files 或 read_skill_file 确认。只有当说明文档没有明确脚本路径时，才需要先 list_skill_files 查看目录结构。\n"
             + "5) 只有在需要更深信息时，才调用 read_skill_file\n"
             + "6) 只有在明确需要执行脚本/命令时，才调用 run_skill_command\n"
-            + "7) 执行前必须先确认技能包内确实存在可执行入口（脚本/模块等），不要猜测模块名；如果缺少可执行入口，则先交付当前可交付产物，并询问用户是否允许你在 temp 目录中自行创建脚本后再尝试生成。\n"
+            + "7) 如果 SKILL.md 已明确给出可执行入口，直接执行即可；如果缺少可执行入口，则先交付当前可交付产物，并询问用户是否允许你在 temp 目录中自行创建脚本后再尝试生成。\n"
             + "8) 按说明书要求生成最终文件后，必须用 export_temp_file 标记最终文件\n"
             + "路径规则：uploads/ 与你用 write_temp_file 生成的中间产物都位于 session_dir 下；run_skill_command 的 cwd 在 skills_root/<skill_name> 下。\n"
             + "因此：只要命令参数需要引用 uploads/ 或 temp 中间文件，一律使用 read_temp_file 返回的绝对路径（result.path）传给命令；不要使用 ../uploads、../../temp 这类相对路径猜测。\n"
@@ -264,6 +264,7 @@ class SkillAgentTool(Tool):
             + "补充规则2：当你需要向用户追问任何信息时：本轮必须只输出问题与选项，并立刻结束；不得在同一轮继续读取任何文件、执行任何命令、生成任何产物。\n"
             + "补充规则3：默认值只能在用户明确说‘默认/随便/你决定’时启用；用户未回复不等于选择了默认。"
             + "补充规则4：当你准备调用 write_temp_file 时，必须先在自然语言里输出一行“写入意图确认”，包含：relative_path + 内容摘要（前 80 字）+ 大致长度；然后再发起工具调用。relative_path 必须是文件路径（不能是空、'.'、'..'、不能以 '/' 结尾，不能指向目录）。\n"
+            + "补充规则5：如果收到的命令执行结果（stdout）是 JSON 格式，你必须将其转换为结构化的中文自然语言摘要（如表格、列表等），禁止直接输出原始 JSON。\n"
             + (uploads_context or "")
             + "你必须把实现过程中的中间产物写入 temp 会话目录（脚本、草稿、生成物等）：\n"
             + "- 写文本：write_temp_file\n"
@@ -551,6 +552,10 @@ class SkillAgentTool(Tool):
                         tool_name = str(name or "")
                         _dbg(f"tool_call name={tool_name} id={call_id!s} args={_shorten_text(arguments, 400)}")
 
+                        # 自动将字符串 command 转为数组
+                        if isinstance(arguments, dict):
+                            arguments = _coerce_command_to_list(arguments)
+
                         ok_args, arg_detail = _validate_tool_arguments(tool_name, arguments)
                         if not ok_args:
                             result = {
@@ -595,11 +600,11 @@ class SkillAgentTool(Tool):
                                     )
                                 )
                                 continue
-                            if tool_name == "run_skill_command" and skill_name and not runtime.has_listed_skill_files(skill_name):
+                            if tool_name == "run_skill_command" and skill_name and not runtime.has_skill_metadata(skill_name):
                                 result = {
-                                    "error": "skill_files_listing_required",
+                                    "error": "skill_md_required",
                                     "skill_name": skill_name,
-                                    "detail": "执行技能命令前，必须先调用 list_skill_files(skill_name) 查看技能包目录结构。",
+                                    "detail": "执行技能命令前，必须先调用 get_skill_metadata(skill_name) 读取 SKILL.md。",
                                 }
                                 _dbg(f"tool_result name={tool_name} result={_shorten_text(result, 700)}")
                                 messages.append(
@@ -612,8 +617,8 @@ class SkillAgentTool(Tool):
                                 messages.append(
                                     UserPromptMessage(
                                         content=(
-                                            f"你刚才尝试调用 `{tool_name}` 但尚未查看技能《{skill_name}》的目录结构。"
-                                            f"请先调用 list_skill_files({skill_name!r})，再重试该工具调用。"
+                                            f"你刚才尝试调用 `{tool_name}` 但尚未读取技能《{skill_name}》的说明文档。"
+                                            f"请先调用 get_skill_metadata({skill_name!r})，再重试该工具调用。"
                                         )
                                     )
                                 )
@@ -837,6 +842,9 @@ class SkillAgentTool(Tool):
                 if not isinstance(arguments, dict):
                     arguments = {}
 
+                # 自动将字符串 command 转为数组
+                arguments = _coerce_command_to_list(arguments)
+
                 ok_args, arg_detail = _validate_tool_arguments(name, arguments)
                 if not ok_args:
                     messages.append(UserPromptMessage(content=_tool_call_retry_prompt(name, arg_detail)))
@@ -877,19 +885,19 @@ class SkillAgentTool(Tool):
                             )
                         )
                         continue
-                    if name == "run_skill_command" and skill_name and not runtime.has_listed_skill_files(skill_name):
+                    if name == "run_skill_command" and skill_name and not runtime.has_skill_metadata(skill_name):
                         messages.append(
                             UserPromptMessage(
                                 content=(
-                                    f"你刚才尝试调用 `{name}` 但尚未查看技能《{skill_name}》的目录结构。"
-                                    f"请先调用 list_skill_files({skill_name!r})，再重试该工具调用。"
+                                    f"你刚才尝试调用 `{name}` 但尚未读取技能《{skill_name}》的说明文档。"
+                                    f"请先调用 get_skill_metadata({skill_name!r})，再重试该工具调用。"
                                 )
                             )
                         )
                         result = {
-                            "error": "skill_files_listing_required",
+                            "error": "skill_md_required",
                             "skill_name": skill_name,
-                            "detail": "执行技能命令前，必须先调用 list_skill_files(skill_name) 查看技能包目录结构。",
+                            "detail": "执行技能命令前，必须先调用 get_skill_metadata(skill_name) 读取 SKILL.md。",
                         }
                         _dbg(f"json_tool_result name={name} result={_shorten_text(result, 700)}")
                         messages.append(

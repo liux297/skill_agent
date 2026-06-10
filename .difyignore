@@ -184,4 +184,5 @@ Thumbs.db
 *.difypkg
 temp/
 skills/
+screenshot_*.png
 
