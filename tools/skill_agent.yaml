@@ -111,7 +111,7 @@ parameters:
       pt_BR: "Prompt de sistema personalizado para substituir as instruções padrão do agente."
       ja_JP: "エージェントのデフォルト動作指示を上書きするカスタムシステムプロンプト。"
     llm_description: "Custom system prompt that overrides or extends the default agent behavior instructions. Leave empty to use built-in defaults."
-    form: llm
+    form: form
 
   - name: custom_variables
     type: string
