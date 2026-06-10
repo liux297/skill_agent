@@ -469,11 +469,19 @@ class SkillAgentTool(Tool):
                     yield self.create_text_message(tagged[i : i + step])
                     streamed_any = True
             
-            def should_emit_user_text(text: str) -> bool:
+            def should_emit_user_text(text: str, *, streaming: bool = False) -> bool:
                 if not text:
                     return False
-                # 仅检测完整 JSON 协议响应并抑制展示，不再抑制以 { 或 ``` 开头的部分文本
-                # 这样可以避免 LLM 输出中的代码块、花括号开头的内容等被错误截断
+                s = str(text)
+                stripped = s.lstrip()
+                # 流式输出时，如果文本以 { 开头但尚未形成完整 JSON，暂不输出（等待更多数据）
+                # 避免将 JSON 协议的工具调用逐字展示给用户
+                if streaming and stripped.startswith("{") and _extract_first_json_object(s) is None:
+                    return False
+                # 流式输出时，如果文本以 ``` 开头但代码块未闭合，暂不输出
+                if streaming and stripped.startswith("```") and stripped.count("```") < 2:
+                    return False
+                # 检测完整 JSON 协议响应并抑制展示
                 json_text = _extract_first_json_object(text)
                 if not json_text:
                     return True
@@ -535,7 +543,7 @@ class SkillAgentTool(Tool):
                     if t:
                         text_parts.append(t)
                         combined_text_live = "".join(text_parts).strip()
-                        if combined_text_live and not saw_tool_calls and should_emit_user_text(combined_text_live):
+                        if combined_text_live and not saw_tool_calls and should_emit_user_text(combined_text_live, streaming=True):
                             if not emitted_prefix:
                                 yield self.create_text_message("\n【🤖Skill_Agent】\n")
                                 emitted_prefix = True
