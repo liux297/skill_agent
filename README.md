@@ -22,6 +22,7 @@ This version includes meaningful enhancements on top of the original:
 - **Smart Command Coercion**: Automatically converts string commands to arrays and strips backticks accidentally copied from Markdown code blocks.
 - **Structured Output Formatting**: Command results returned as JSON are automatically converted to structured natural-language summaries.
 - **Enhanced Diagnostics**: Improved error messages for DNS/network failures and empty stdout to help the LLM self-diagnose issues.
+- **Minimized Intermediate Confirmations**: The agent autonomously completes all intermediate steps without unnecessary user confirmations, only pausing at critical decision points (e.g., destructive operations) or when essential information is missing.
 
 ### Introduction
 
@@ -100,7 +101,8 @@ The `custom_variables` parameter accepts a JSON object of key-value pairs that w
 5. Add auto coercion of string commands to arrays with backtick stripping
 6. Add structured JSON-to-natural-language formatting for command output
 7. Enhance diagnostics for DNS failures and empty stdout
-8. Version bump to 0.1.0
+8. Add minimal-confirmation principle: agent completes all steps autonomously, only pausing at critical decisions
+9. Version bump to 0.1.0
 
 **v0.0.3 (original by lfenghx):**
 1. Support agent streaming output

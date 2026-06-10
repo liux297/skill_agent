@@ -30,6 +30,7 @@ Data is used strictly for:
 - Running whitelisted commands (e.g., `python`, `node`) inside controlled directories to generate deliverables.
 - Injecting custom variables as environment variables into subprocess command execution.
 - Returning the final text and generated files back to Dify as tool outputs.
+- Autonomous multi-step execution with minimal user confirmations: the agent completes all intermediate steps directly and only pauses to ask for user input at critical decision points (e.g., destructive operations or missing essential information).
 
 ### 4. Data Sharing & Third Parties
 

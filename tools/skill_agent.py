@@ -62,7 +62,8 @@ class SkillAgentTool(Tool):
         history_turns = int(tool_parameters.get("history_turns") or 0)
         system_prompt = tool_parameters.get("system_prompt") or "你是一个xxxx"
         # 详细模式开关：控制是否向用户展示工具调用/执行细节（调试时开启，面向用户时可关闭）
-        verbose = tool_parameters.get("verbose") != False
+        _verbose_raw = tool_parameters.get("verbose")
+        verbose = _verbose_raw not in (False, "false", "False", 0, "0")
         skills_root = _detect_skills_root(tool_parameters.get("skills_root"))
         custom_variables_raw = tool_parameters.get("custom_variables") or ""
         custom_variables: dict[str, str] = {}
@@ -94,7 +95,7 @@ class SkillAgentTool(Tool):
         if persisted_session_dir and os.path.isdir(persisted_session_dir):
             session_dir = persisted_session_dir
         else:
-            session_dir = os.path.join(temp_root, f"dify-skill-{uuid.uuid4().hex[:8]}-")
+            session_dir = os.path.join(temp_root, f"dify-skill-{uuid.uuid4().hex[:8]}")
         resume_context = ""
 
         if resume_pending and _is_deny_reply(user_input):
@@ -185,7 +186,9 @@ class SkillAgentTool(Tool):
             uploads_dir = _safe_join(session_dir, "uploads")
             os.makedirs(uploads_dir, exist_ok=True)
 
-        uploads_context = _build_uploads_context(session_dir)
+        # 仅在前面未构建上传文件清单时，才从磁盘扫描补充
+        if not uploads_context:
+            uploads_context = _build_uploads_context(session_dir)
 
         runtime = _AgentRuntime(
             skills_root=skills_root,
@@ -263,11 +266,14 @@ class SkillAgentTool(Tool):
             + "因此：只要命令参数需要引用 uploads/ 或 temp 中间文件，一律使用 read_temp_file 返回的绝对路径（result.path）传给命令；不要使用 ../uploads、../../temp 这类相对路径猜测。\n"
             + "依赖安装规则：如需 npm install/npm ci/bun install，必须用 run_skill_command 在技能包内含 package.json 的目录执行（通过 cwd_relative 指到该目录）；禁止在 session_dir 执行 install，否则会写入 temp/<session>/node_modules 导致每次会话重复安装。\n"
             + "补充规则1：如果用户请求中已经明确给出具体类型/参数，则视为已确认，不要重复追问，直接进入对应分支执行。\n"
-            + "补充规则2：当你需要向用户追问任何信息时：本轮必须只输出问题与选项，并立刻结束；不得在同一轮继续读取任何文件、执行任何命令、生成任何产物。\n"
+            + "补充规则2：禁止主动追问。当用户输入存在明显错别字或表述不清时，你应该自主推断其真实意图并直接执行，而不是反问用户。只有当用户意图完全无法推断、且缺少该信息确实无法继续时，才允许追问。追问时：本轮只输出问题，立刻结束，不得继续执行任何操作。\n"
             + "补充规则3：默认值只能在用户明确说‘默认/随便/你决定’时启用；用户未回复不等于选择了默认。"
             + "补充规则4：当你准备调用 write_temp_file 时，必须先在自然语言里输出一行“写入意图确认”，包含：relative_path + 内容摘要（前 80 字）+ 大致长度；然后再发起工具调用。relative_path 必须是文件路径（不能是空、'.'、'..'、不能以 '/' 结尾，不能指向目录）。\n"
             + "补充规则5：如果收到的命令执行结果（stdout）是 JSON 格式，你必须将其转换为结构化的中文自然语言摘要（如表格、列表等），禁止直接输出原始 JSON。\n"
-            + "补充规则6：技能管理流程——当用户上传技能压缩包（zip）并要求添加/安装技能时，请按以下步骤执行：\n"
+            + "补充规则6（最小化中间确认原则）：在处理用户请求的全过程中，绝对禁止不必要的中间确认和询问。遇到以下情况必须直接执行而不是追问：(1) 用户输入有错别字但意图明确（如'安些'='哪些'）；(2) 请求简短但结合技能索引可以推断意图；(3) 任何可以通过自主判断解决的问题。只有删除用户数据、执行不可逆操作等真正关键决策点才允许暂停确认。\n"
+            + "补充规则7（禁止输出裸命令）：绝对禁止将 curl、bash、python 等原始命令作为文本输出给用户。所有命令执行必须通过 run_skill_command 或 run_temp_command 工具调用。即使 SKILL.md 中包含 curl 示例，你也必须将其转换为 run_skill_command 工具调用来执行，而不是输出 curl 命令文本。\n"
+            + "补充规则8（必须完成到最终结果）：你必须持续推进直到获得最终结果并用业务语言回复用户。绝对禁止在以下情况停止：(1) 刚调用完工具但还未处理返回数据；(2) 已拿到 API 数据但还未转换为用户可理解的业务回复；(3) 任何中间步骤。只有当你已经用业务语言向用户给出了完整的最终回答后，才可以结束。\n"
+            + "补充规则9：技能管理流程——当用户上传技能压缩包（zip）并要求添加/安装技能时，请按以下步骤执行：\n"
             + "  (1) 如果上传的是 zip 文件且尚未解压，先用 run_temp_command 执行 unzip 解压到 session_dir\n"
             + "  (2) 调用 install_skill(source_path=解压后目录或zip路径, skill_name=用户指定的名称) 安装到 skills_root\n"
             + "  (3) 安装成功后即可通过 get_skill_metadata / list_skill_files 等工具使用该技能\n"
@@ -336,19 +342,23 @@ class SkillAgentTool(Tool):
             s = str(text or "")
             if not s:
                 return s
+            # 只脱敏 session_dir 和 skills_root 这两个已知敏感路径
             for p in [session_dir, skills_root]:
                 if p and isinstance(p, str):
                     s = s.replace(p, "<REDACTED_PATH>")
                     s = s.replace(p.replace("\\", "/"), "<REDACTED_PATH>")
-            s = re.sub(r"[A-Za-z]:\\[^\s\r\n\t\"']+", "<REDACTED_PATH>", s)
-            s = re.sub(r"/[^\s\r\n\t\"']+", "<REDACTED_PATH>", s)
             return s
 
         # 工具调用进度消息：verbose 开启时展示细节，关闭时只输出简洁描述
+        _non_verbose_emitted = False
+
         def emit_tool_progress(tool_name: str, detail: str = "") -> Generator[ToolInvokeMessage]:
+            nonlocal _non_verbose_emitted
             if not verbose:
-                # 非详细模式：不暴露工具名和参数，仅输出通用处理提示
-                yield self.create_text_message("⏳ 正在处理…\n")
+                # 非详细模式：仅首次输出通用处理提示，避免多步调用时刷屏
+                if not _non_verbose_emitted:
+                    _non_verbose_emitted = True
+                    yield self.create_text_message("⏳ 正在处理…\n")
                 return
             # 详细模式：展示具体工具名称和操作对象
             _brief_map = {
@@ -462,12 +472,8 @@ class SkillAgentTool(Tool):
             def should_emit_user_text(text: str) -> bool:
                 if not text:
                     return False
-                s = str(text)
-                stripped = s.lstrip()
-                if stripped.startswith("{") and _extract_first_json_object(s) is None:
-                    return False
-                if stripped.startswith("```") and stripped.count("```") < 2:
-                    return False
+                # 仅检测完整 JSON 协议响应并抑制展示，不再抑制以 { 或 ``` 开头的部分文本
+                # 这样可以避免 LLM 输出中的代码块、花括号开头的内容等被错误截断
                 json_text = _extract_first_json_object(text)
                 if not json_text:
                     return True
@@ -639,29 +645,6 @@ class SkillAgentTool(Tool):
                                     )
                                 )
                                 continue
-                            if tool_name == "run_skill_command" and skill_name and not runtime.has_skill_metadata(skill_name):
-                                result = {
-                                    "error": "skill_md_required",
-                                    "skill_name": skill_name,
-                                    "detail": "执行技能命令前，必须先调用 get_skill_metadata(skill_name) 读取 SKILL.md。",
-                                }
-                                _dbg(f"tool_result name={tool_name} result={_shorten_text(result, 700)}")
-                                messages.append(
-                                    ToolPromptMessage(
-                                        tool_call_id=str(call_id or ""),
-                                        name=tool_name,
-                                        content=json.dumps(result, ensure_ascii=False),
-                                    )
-                                )
-                                messages.append(
-                                    UserPromptMessage(
-                                        content=(
-                                            f"你刚才尝试调用 `{tool_name}` 但尚未读取技能《{skill_name}》的说明文档。"
-                                            f"请先调用 get_skill_metadata({skill_name!r})，再重试该工具调用。"
-                                        )
-                                    )
-                                )
-                                continue
 
                         # 构建工具操作描述（用于详细模式展示，非详细模式不使用）
                         _skill_name_arg = str(arguments.get("skill_name") or "")
@@ -672,7 +655,7 @@ class SkillAgentTool(Tool):
                                 "get_skill_metadata", "list_skill_files",
                                 "install_skill", "uninstall_skill", "update_skill",
                             )
-                            else (_rel_path_arg if tool_name in ("write_temp_file", "read_temp_file")
+                            else (_rel_path_arg if tool_name in ("write_temp_file", "read_temp_file", "read_skill_file")
                             else (str(arguments.get("temp_relative_path") or "") if tool_name == "export_temp_file"
                             else ""))
                         )
@@ -930,27 +913,6 @@ class SkillAgentTool(Tool):
                             )
                         )
                         continue
-                    if name == "run_skill_command" and skill_name and not runtime.has_skill_metadata(skill_name):
-                        messages.append(
-                            UserPromptMessage(
-                                content=(
-                                    f"你刚才尝试调用 `{name}` 但尚未读取技能《{skill_name}》的说明文档。"
-                                    f"请先调用 get_skill_metadata({skill_name!r})，再重试该工具调用。"
-                                )
-                            )
-                        )
-                        result = {
-                            "error": "skill_md_required",
-                            "skill_name": skill_name,
-                            "detail": "执行技能命令前，必须先调用 get_skill_metadata(skill_name) 读取 SKILL.md。",
-                        }
-                        _dbg(f"json_tool_result name={name} result={_shorten_text(result, 700)}")
-                        messages.append(
-                            AssistantPromptMessage(
-                                content="TOOL_RESULT\n" + json.dumps({"name": name, "result": result}, ensure_ascii=False)
-                            )
-                        )
-                        continue
 
                 _dbg(f"json_tool name={name} args={_shorten_text(arguments, 400)}")
                 messages.append(AssistantPromptMessage(content=json.dumps(action, ensure_ascii=False)))
@@ -964,7 +926,7 @@ class SkillAgentTool(Tool):
                         "get_skill_metadata", "list_skill_files",
                         "install_skill", "uninstall_skill", "update_skill",
                     )
-                    else (_j_rel if name in ("write_temp_file", "read_temp_file")
+                    else (_j_rel if name in ("write_temp_file", "read_temp_file", "read_skill_file")
                     else (str(arguments.get("temp_relative_path") or "") if name == "export_temp_file"
                     else ""))
                 )
