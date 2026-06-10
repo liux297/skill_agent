@@ -881,28 +881,6 @@ class SkillAgentTool(Tool):
                         action = None
                 _dbg(f"json_protocol detected={bool(action)} snippet={_shorten_text(json_text or '', 200)}")
 
-                # 检测 TOOL_RESULT 回声：LLM 把上轮的 TOOL_RESULT 当作自己的输出
-                # 这不是有效的 action，应提示 LLM 继续任务
-                if action and "name" in action and "result" in action and "type" not in action:
-                    _dbg(f"tool_result_echo detected, prompting continuation")
-                    messages.append(
-                        UserPromptMessage(
-                            content="你刚才输出了工具执行结果，但这不是你的回答。请继续完成任务：如果需要调用工具请输出 JSON，否则输出最终回答。"
-                        )
-                    )
-                    continue
-
-                # 检测不完整的 TOOL_RESULT 输出（如 "TOOL"、"TOOL_RESULT" 但无后续 JSON）
-                # LLM 可能输出了 TOOL_RESULT 的部分前缀就停止了，应提示继续
-                if res_text and res_text.lstrip().startswith(_TOOL_RESULT_PREFIXES):
-                    _dbg(f"incomplete_tool_output detected: {_shorten_text(res_text, 100)}, prompting continuation")
-                    messages.append(
-                        UserPromptMessage(
-                            content="你刚才的输出不完整。请继续完成任务：如果需要调用工具请输出完整 JSON，否则请直接输出最终回答。"
-                        )
-                    )
-                    continue
-
                 if not res_text and not action and not nontext:
                     empty_responses += 1
                     _dbg(f"empty_response_count={empty_responses}")
