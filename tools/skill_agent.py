@@ -470,6 +470,16 @@ class SkillAgentTool(Tool):
                     yield self.create_text_message(tagged[i : i + step])
                     streamed_any = True
             
+            def _is_internal_json(obj: dict) -> bool:
+                """判断 JSON 是否为内部协议格式（不应展示给用户）"""
+                t = obj.get("type")
+                if t in ("tool", "final"):
+                    return True
+                # TOOL_RESULT 回声格式：有 name+result 但无 type
+                if "name" in obj and "result" in obj and "type" not in obj:
+                    return True
+                return False
+
             def should_emit_user_text(text: str) -> bool:
                 if not text:
                     return False
@@ -486,8 +496,7 @@ class SkillAgentTool(Tool):
                     return True
                 if not isinstance(obj, dict):
                     return True
-                t = obj.get("type")
-                return t not in {"tool", "final"}
+                return not _is_internal_json(obj)
 
             def _safe_stream_boundary(text: str) -> int:
                 """流式输出时，计算可安全输出的文本长度。
@@ -506,11 +515,11 @@ class SkillAgentTool(Tool):
                 if json_text:
                     try:
                         obj = json.loads(json_text)
-                        if isinstance(obj, dict) and obj.get("type") in ("tool", "final"):
-                            return brace_pos  # 是协议响应，只输出 JSON 之前的部分
+                        if isinstance(obj, dict) and _is_internal_json(obj):
+                            return brace_pos  # 是内部协议，只输出 JSON 之前的部分
                     except Exception:
                         pass
-                    return len(text)  # JSON 不是协议类型，全部可输出
+                    return len(text)  # JSON 不是内部协议，全部可输出
                 # JSON 未完成，只输出 { 之前的部分
                 return brace_pos
 
