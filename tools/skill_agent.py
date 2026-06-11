@@ -354,35 +354,120 @@ class SkillAgentTool(Tool):
             return s
 
         # 工具调用进度消息：verbose 开启时展示细节，关闭时只输出简洁描述
-        _non_verbose_emitted = False
+        _tool_step_counter = 0
+        _non_verbose_header_emitted = False
+
+        # 数字序号映射（最多 20 步，超出后回退为普通数字）
+        _CIRCLED_NUMS = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
+
+        def _step_label() -> str:
+            """返回当前步骤的圆圈数字标签。"""
+            idx = _tool_step_counter - 1
+            if 0 <= idx < len(_CIRCLED_NUMS):
+                return _CIRCLED_NUMS[idx]
+            return f"({idx + 1})"
 
         def emit_tool_progress(tool_name: str, detail: str = "") -> Generator[ToolInvokeMessage]:
-            nonlocal _non_verbose_emitted
+            nonlocal _tool_step_counter, _non_verbose_header_emitted
+            _tool_step_counter += 1
+            label = _step_label()
+
             if not verbose:
-                # 非详细模式：仅首次输出通用处理提示，避免多步调用时刷屏
-                if not _non_verbose_emitted:
-                    _non_verbose_emitted = True
-                    yield self.create_text_message("⏳ 正在处理…\n")
+                # ── 非详细模式：按阶段展示简洁标题，避免刷屏 ──
+                _phase_map = {
+                    "get_skill_metadata": "查阅技能",
+                    "list_skill_files": "浏览文件",
+                    "read_skill_file": "读取文件",
+                    "run_skill_command": "执行命令",
+                    "write_temp_file": "写入文件",
+                    "read_temp_file": "读取文件",
+                    "list_temp_files": "查看文件",
+                    "run_temp_command": "执行命令",
+                    "export_temp_file": "交付文件",
+                    "install_skill": "安装技能",
+                    "list_installed_skills": "查看技能",
+                    "uninstall_skill": "卸载技能",
+                    "update_skill": "更新技能",
+                    "get_session_context": "获取上下文",
+                }
+                phase = _phase_map.get(tool_name, "处理中")
+                if not _non_verbose_header_emitted:
+                    _non_verbose_header_emitted = True
+                    yield self.create_text_message("\n⏳ **正在处理中…**\n")
+                yield self.create_text_message(f"  {label} {phase}\n")
                 return
-            # 详细模式：展示具体工具名称和操作对象
-            _brief_map = {
-                "get_skill_metadata": f"✅正在查看技能《{detail}》说明书…",
-                "list_skill_files": f"✅正在查看技能《{detail}》文件结构…",
-                "read_skill_file": f"✅正在读取文件：{detail}…",
-                "run_skill_command": f"✅正在执行命令…",
-                "write_temp_file": f"✅正在写入文件：{detail}…",
-                "read_temp_file": f"✅正在读取临时文件：{detail}…",
-                "list_temp_files": "✅正在查看临时目录文件…",
-                "run_temp_command": "✅正在执行命令…",
-                "export_temp_file": f"✅正在标记交付文件：{detail}…",
-                # 技能管理工具
-                "install_skill": f"✅正在安装技能《{detail}》…",
-                "list_installed_skills": "✅正在查看已安装技能列表…",
-                "uninstall_skill": f"✅正在卸载技能《{detail}》…",
-                "update_skill": f"✅正在更新技能《{detail}》…",
+
+            # ── 详细模式：展示分类图标 + 步骤编号 + 操作对象 ──
+            _detail_map = {
+                "get_skill_metadata": ("🔍", f"查阅技能《{detail}》说明书"),
+                "list_skill_files": ("📂", f"浏览技能《{detail}》文件结构"),
+                "read_skill_file": ("📄", f"读取文件：{detail}"),
+                "run_skill_command": ("⚡", "执行技能命令"),
+                "write_temp_file": ("📝", f"写入文件：{detail}"),
+                "read_temp_file": ("📖", f"读取临时文件：{detail}"),
+                "list_temp_files": ("📋", "查看临时目录"),
+                "run_temp_command": ("⚡", "执行临时命令"),
+                "export_temp_file": ("📦", f"标记交付文件：{detail}"),
+                "install_skill": ("🔧", f"安装技能《{detail}》"),
+                "list_installed_skills": ("🔧", "查看已安装技能"),
+                "uninstall_skill": ("🗑️", f"卸载技能《{detail}》"),
+                "update_skill": ("🔄", f"更新技能《{detail}》"),
+                "get_session_context": ("ℹ️", "获取会话上下文"),
             }
-            msg = _brief_map.get(tool_name, f"✅正在执行 {tool_name}…")
-            yield self.create_text_message(msg + "\n")
+            icon, desc = _detail_map.get(tool_name, ("⚙️", f"执行 {tool_name}"))
+            yield self.create_text_message(f"{icon} {label} {desc}\n")
+
+        def emit_tool_result(tool_name: str, result: Any) -> Generator[ToolInvokeMessage]:
+            """verbose 模式下，工具执行完后展示简短结果摘要。"""
+            if not verbose:
+                return
+            if not isinstance(result, dict):
+                return
+            # 出错时展示简短错误提示
+            err = result.get("error")
+            if err:
+                yield self.create_text_message(f"  ⚠️ {err}\n")
+                return
+            # 按工具类型展示关键结果
+            if tool_name == "get_skill_metadata":
+                skill = result.get("skill", "")
+                yield self.create_text_message(f"  ✔️ 已获取《{skill}》说明书\n")
+            elif tool_name == "list_skill_files":
+                entries = result.get("entries") or []
+                yield self.create_text_message(f"  ✔️ 共 {len(entries)} 个文件/目录\n")
+            elif tool_name in ("read_skill_file", "read_temp_file"):
+                content = result.get("content", "")
+                lines = content.count("\n") + 1 if content else 0
+                yield self.create_text_message(f"  ✔️ 已读取 {lines} 行\n")
+            elif tool_name in ("run_skill_command", "run_temp_command"):
+                rc = result.get("returncode")
+                stdout = result.get("stdout", "")
+                if rc == 0:
+                    out_len = len(stdout)
+                    yield self.create_text_message(f"  ✔️ 执行成功（输出 {out_len} 字符）\n")
+                else:
+                    yield self.create_text_message(f"  ❌ 执行失败（返回码 {rc}）\n")
+            elif tool_name == "write_temp_file":
+                nbytes = result.get("bytes", 0)
+                yield self.create_text_message(f"  ✔️ 已写入 {nbytes} 字节\n")
+            elif tool_name == "list_temp_files":
+                entries = result.get("entries") or []
+                yield self.create_text_message(f"  ✔️ 共 {len(entries)} 个文件/目录\n")
+            elif tool_name == "export_temp_file":
+                name = result.get("requested_name", "")
+                yield self.create_text_message(f"  ✔️ 已标记交付：{name}\n")
+            elif tool_name == "install_skill":
+                skill = result.get("skill", "")
+                yield self.create_text_message(f"  ✔️ 技能《{skill}》安装成功\n")
+            elif tool_name == "list_installed_skills":
+                count = result.get("skills_count", 0)
+                yield self.create_text_message(f"  ✔️ 已安装 {count} 个技能\n")
+            elif tool_name == "uninstall_skill":
+                skill = result.get("skill", "")
+                yield self.create_text_message(f"  ✔️ 技能《{skill}》已卸载\n")
+            elif tool_name == "update_skill":
+                skill = result.get("skill", "")
+                yield self.create_text_message(f"  ✔️ 技能《{skill}》已更新\n")
 
         def persist_llm_assets(parts: Any) -> list[str]:
             if not parts or not isinstance(parts, list):
@@ -850,6 +935,7 @@ class SkillAgentTool(Tool):
                             result = {"error": f"unknown tool: {tool_name}"}
 
                         _dbg(f"tool_result name={tool_name} result={_shorten_text(result, 700)}")
+                        yield from emit_tool_result(tool_name, result)
                         messages.append(
                             ToolPromptMessage(
                                 tool_call_id=str(call_id or ""),
@@ -1092,6 +1178,7 @@ class SkillAgentTool(Tool):
                     result = {"error": f"unknown tool: {name}"}
 
                 _dbg(f"json_tool_result name={name} result={_shorten_text(result, 700)}")
+                yield from emit_tool_result(name, result)
                 messages.append(
                     AssistantPromptMessage(
                         content="TOOL_RESULT\n" + json.dumps({"name": name, "result": result}, ensure_ascii=False)
