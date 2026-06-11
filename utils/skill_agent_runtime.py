@@ -235,7 +235,7 @@ class _AgentRuntime:
             return {"error": "command must be a non-empty list"}
         skill_path = _safe_join(self.skills_root, skill_name)
         exe = command[0]
-        if exe == "python":
+        if exe in ("python", "python3"):
             if "-m" in command:
                 module_index = command.index("-m") + 1
                 if module_index < len(command):
@@ -303,7 +303,7 @@ class _AgentRuntime:
         if not command:
             return {"error": "command must be a non-empty list"}
         exe = command[0]
-        if exe == "python":
+        if exe in ("python", "python3"):
             if "-m" in command:
                 module_index = command.index("-m") + 1
                 if module_index < len(command):

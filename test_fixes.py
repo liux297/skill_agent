@@ -3,6 +3,13 @@ import json
 import unittest
 
 
+# ========== 导入项目模块 ==========
+import sys
+import os
+sys.path.insert(0, os.path.dirname(__file__))
+from utils.skill_agent_constants import ALLOWED_COMMANDS
+
+
 # ========== 复制待测试的函数逻辑 ==========
 
 def _extract_first_json_object(text: str) -> str | None:
@@ -229,6 +236,91 @@ class TestSessionDirNaming(unittest.TestCase):
         hex_val = "a1b2c3"
         old_format = f"dify-skill-{hex_val}-"
         self.assertTrue(old_format.endswith("-"))
+
+
+class TestAllowedCommandsWhitelist(unittest.TestCase):
+    """测试 ALLOWED_COMMANDS 白名单包含新增的命令"""
+
+    def test_python_in_whitelist(self):
+        self.assertIn("python", ALLOWED_COMMANDS)
+
+    def test_python3_in_whitelist(self):
+        self.assertIn("python3", ALLOWED_COMMANDS, "python3 必须在白名单中，否则 macOS/Linux 上命令会被拦截")
+
+    def test_pip_in_whitelist(self):
+        self.assertIn("pip", ALLOWED_COMMANDS)
+
+    def test_pip3_in_whitelist(self):
+        self.assertIn("pip3", ALLOWED_COMMANDS, "pip3 必须在白名单中")
+
+    def test_sh_in_whitelist(self):
+        self.assertIn("sh", ALLOWED_COMMANDS, "sh 必须在白名单中")
+
+    def test_bash_in_whitelist(self):
+        self.assertIn("bash", ALLOWED_COMMANDS)
+
+    def test_node_in_whitelist(self):
+        self.assertIn("node", ALLOWED_COMMANDS)
+
+    def test_npm_in_whitelist(self):
+        self.assertIn("npm", ALLOWED_COMMANDS)
+
+    def test_unsafe_command_not_in_whitelist(self):
+        """危险命令不应在白名单中"""
+        for cmd in ("rm", "sudo", "chmod", "chown", "dd", "mkfs"):
+            self.assertNotIn(cmd, ALLOWED_COMMANDS, f"{cmd} 不应在白名单中")
+
+
+class TestPython3Rewrite(unittest.TestCase):
+    """测试 python3 命令在 run_skill_command / run_temp_command 中会被重写为 sys.executable"""
+
+    def _simulate_exe_check(self, command: list[str]) -> dict:
+        """模拟 runtime 中的 exe 检查与重写逻辑"""
+        exe = command[0]
+        if exe in ("python", "python3"):
+            rewritten = [sys.executable] + command[1:]
+            return {"rewritten": True, "command": rewritten}
+        elif exe not in ALLOWED_COMMANDS:
+            return {"error": f"command not allowed: {exe}"}
+        else:
+            return {"rewritten": False, "command": command}
+
+    def test_python_gets_rewritten(self):
+        result = self._simulate_exe_check(["python", "script.py"])
+        self.assertTrue(result.get("rewritten"))
+        self.assertEqual(result["command"][0], sys.executable)
+
+    def test_python3_gets_rewritten(self):
+        result = self._simulate_exe_check(["python3", "script.py"])
+        self.assertTrue(result.get("rewritten"), "python3 必须被重写为 sys.executable")
+        self.assertEqual(result["command"][0], sys.executable)
+        self.assertEqual(result["command"][1], "script.py")
+
+    def test_python3_with_m_module(self):
+        result = self._simulate_exe_check(["python3", "-m", "http.server"])
+        self.assertTrue(result.get("rewritten"))
+        self.assertEqual(result["command"][0], sys.executable)
+        self.assertIn("-m", result["command"])
+
+    def test_sh_not_rewritten_but_allowed(self):
+        result = self._simulate_exe_check(["sh", "script.sh"])
+        self.assertFalse(result.get("rewritten"))
+        self.assertNotIn("error", result)
+
+    def test_bash_not_rewritten_but_allowed(self):
+        result = self._simulate_exe_check(["bash", "script.sh"])
+        self.assertFalse(result.get("rewritten"))
+        self.assertNotIn("error", result)
+
+    def test_disallowed_command_blocked(self):
+        result = self._simulate_exe_check(["rm", "-rf", "/"])
+        self.assertIn("error", result)
+        self.assertIn("not allowed", result["error"])
+
+    def test_node_not_rewritten_but_allowed(self):
+        result = self._simulate_exe_check(["node", "app.js"])
+        self.assertFalse(result.get("rewritten"))
+        self.assertNotIn("error", result)
 
 
 if __name__ == "__main__":

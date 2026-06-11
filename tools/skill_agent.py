@@ -1234,16 +1234,36 @@ class SkillAgentTool(Tool):
                 files_to_send = []
 
             has_any_files = False
+            temp_file_entries: list[dict] = []
             try:
                 temp_entries = _list_dir(session_dir, max_depth=10)
-                has_any_files = any(e.get("type") == "file" for e in temp_entries if isinstance(e, dict))
+                temp_file_entries = [e for e in temp_entries if isinstance(e, dict) and e.get("type") == "file"]
+                has_any_files = len(temp_file_entries) > 0
             except Exception:
                 has_any_files = False
 
+            # 自动兜底：如果有中间文件但未调用 export_temp_file，自动将所有临时文件作为交付文件
+            if not files_to_send and has_any_files:
+                try:
+                    for entry in temp_file_entries:
+                        rel_path = str(entry.get("relative_path") or "").replace("\\", "/").lstrip("/")
+                        if not rel_path:
+                            continue
+                        try:
+                            abs_path = _safe_join(session_dir, rel_path)
+                        except Exception:
+                            continue
+                        if not os.path.isfile(abs_path):
+                            continue
+                        filename = os.path.basename(rel_path)
+                        mime_type = _guess_mime_type(filename)
+                        files_to_send.append((rel_path, abs_path, mime_type, filename))
+                    _dbg(f"auto_exported {len(files_to_send)} temp files (export_temp_file was not called)")
+                except Exception:
+                    files_to_send = []
+
             assistant_text_for_history = ""
             if final_text and final_text.strip():
-                if not files_to_send and final_text.strip() == "已生成文件。":
-                    final_text = "已生成中间文件，但未调用 export_temp_file 标记交付文件。"
                 assistant_text_for_history = final_text.strip()
                 _append_history_turn(
                     storage,
@@ -1262,15 +1282,6 @@ class SkillAgentTool(Tool):
                     assistant_text=assistant_text_for_history,
                 )
                 yield from stream_text_to_user("已生成文件。")
-            elif has_any_files:
-                assistant_text_for_history = "已生成中间文件，但未调用 export_temp_file 标记交付文件。"
-                _append_history_turn(
-                    storage,
-                    history_key=history_key,
-                    user_text=user_input,
-                    assistant_text=assistant_text_for_history,
-                )
-                yield from stream_text_to_user("已生成中间文件，但未调用 export_temp_file 标记交付文件。")
             else:
                 assistant_text_for_history = "未生成任何文本或文件输出。"
                 _append_history_turn(
