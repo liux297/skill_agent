@@ -60,6 +60,7 @@ class SkillAgentTool(Tool):
         max_steps = int(tool_parameters.get("max_steps") or 8)
         memory_turns = int(tool_parameters.get("memory_turns") or 10)
         history_turns = int(tool_parameters.get("history_turns") or 0)
+        max_stdout_chars = int(tool_parameters.get("max_stdout_chars") or 30000)
         system_prompt = tool_parameters.get("system_prompt") or "你是一个xxxx"
         # 详细模式开关：控制是否向用户展示工具调用/执行细节（调试时开启，面向用户时可关闭）
         _verbose_raw = tool_parameters.get("verbose")
@@ -197,6 +198,7 @@ class SkillAgentTool(Tool):
             max_steps=max_steps,
             memory_turns=memory_turns,
             custom_variables=custom_variables,
+            max_stdout_chars=max_stdout_chars,
         )
 
         history_messages: list[Any] = []

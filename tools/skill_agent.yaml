@@ -162,6 +162,23 @@ parameters:
       ja_JP: 以前の実行から挿入する原文のターン数
     llm_description: Inject previous turns as raw transcript for continuity.
     form: form
+
+  - name: max_stdout_chars
+    type: number
+    required: true
+    default: 30000
+    label:
+      en_US: Max stdout chars
+      zh_Hans: 输出截断上限
+      pt_BR: Max stdout chars
+      ja_JP: 最大出力文字数
+    human_description:
+      en_US: "Max characters for command stdout. Exceeded output will be JSON-compressed or truncated. Lower this for small-context models (e.g. 6000 for 4K tokens)."
+      zh_Hans: "命令输出的最大字符数，超出后自动 JSON 压缩或截断。小上下文模型建议调低（如 4K token 模型设为 6000）。"
+      pt_BR: "Max characters for command stdout. Lower for small-context models."
+      ja_JP: "コマンド出力の最大文字数。小さいコンテキストモデルでは下げてください。"
+    llm_description: "Max characters for command stdout before compression/truncation."
+    form: form
 extra:
   python:
     source: tools/skill_agent.py

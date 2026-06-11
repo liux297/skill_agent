@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -23,6 +24,58 @@ from utils.skill_agent_paths import (
 )
 from utils.tools import _list_dir, _parse_frontmatter, _read_text, _safe_join
 
+# 需要从 JSON 响应中自动移除的大字段（通常是嵌套的节点/详情列表，数据量巨大）
+_COMPRESS_REMOVE_KEYS = frozenset({"nodeList"})
+
+
+def _compress_json_value(
+    val: Any,
+    depth: int = 0,
+    max_array_items: int = 20,
+    max_str_len: int = 500,
+) -> Any:
+    """递归压缩 JSON 值：移除大字段、截断长字符串、限制数组长度。"""
+    if depth > 10:
+        return val
+    if isinstance(val, dict):
+        return {
+            k: _compress_json_value(v, depth + 1, max_array_items, max_str_len)
+            for k, v in val.items()
+            if k not in _COMPRESS_REMOVE_KEYS
+        }
+    if isinstance(val, list):
+        truncated = val[:max_array_items]
+        compressed = [_compress_json_value(item, depth + 1, max_array_items, max_str_len) for item in truncated]
+        if len(val) > max_array_items:
+            compressed.append(f"... [共 {len(val)} 项，已省略 {len(val) - max_array_items} 项]")
+        return compressed
+    if isinstance(val, str) and len(val) > max_str_len:
+        return val[:max_str_len] + f"... [已截断，原始长度 {len(val)}]"
+    return val
+
+
+def _try_compress_stdout(stdout: str, max_chars: int) -> str:
+    """当 stdout 超过 max_chars 时，尝试解析为 JSON 并压缩；失败则简单截断。"""
+    if len(stdout) <= max_chars:
+        return stdout
+    try:
+        data = json.loads(stdout)
+        # 第一轮压缩：保留 20 项数组、500 字符字符串
+        compressed = _compress_json_value(data, max_array_items=20, max_str_len=500)
+        result = json.dumps(compressed, ensure_ascii=False)
+        if len(result) <= max_chars:
+            return result
+        # 第二轮压缩：更激进——5 项数组、200 字符字符串
+        compressed2 = _compress_json_value(data, max_array_items=5, max_str_len=200)
+        result2 = json.dumps(compressed2, ensure_ascii=False)
+        if len(result2) <= max_chars:
+            return result2
+        # 仍然超限，返回压缩后结果并标注
+        return result2[:max_chars] + f"\n... [JSON 压缩后仍超限，已截断，原始输出共 {len(stdout)} 字符]"
+    except (json.JSONDecodeError, ValueError):
+        # 非 JSON，简单截断
+        return stdout[:max_chars] + f"\n... [截断，原始输出共 {len(stdout)} 字符]"
+
 
 class _AgentRuntime:
     def __init__(
@@ -33,12 +86,14 @@ class _AgentRuntime:
         max_steps: int,
         memory_turns: int,
         custom_variables: dict[str, str] | None = None,
+        max_stdout_chars: int = 30000,
     ) -> None:
         self.skills_root = skills_root
         self.session_dir = session_dir
         self.max_steps = max_steps
         self.memory_turns = memory_turns
         self.custom_variables = custom_variables or {}
+        self.max_stdout_chars = max_stdout_chars
         self._skill_metadata_cache: dict[str, dict[str, Any]] = {}
         self._skill_files_listed: set[str] = set()
 
@@ -220,10 +275,8 @@ class _AgentRuntime:
             )
             stdout = result.stdout.strip()
             stderr = result.stderr.strip()
-            # 截断过长的 stdout，避免 LLM 上下文溢出
-            MAX_STDOUT_CHARS = 30000
-            if len(stdout) > MAX_STDOUT_CHARS:
-                stdout = stdout[:MAX_STDOUT_CHARS] + f"\n... [截断，原始输出共 {len(stdout)} 字符]"
+            # 智能截断：优先尝试 JSON 压缩（移除大字段），而非简单截断
+            stdout = _try_compress_stdout(stdout, self.max_stdout_chars)
             # 当 stdout 为空时，补充诊断信息帮助 LLM 定位问题
             if not stdout:
                 diag_parts = [f"returncode={result.returncode}"]
@@ -283,6 +336,8 @@ class _AgentRuntime:
             )
             stdout = result.stdout.strip()
             stderr = result.stderr.strip()
+            # 智能截断：优先尝试 JSON 压缩（移除大字段），而非简单截断
+            stdout = _try_compress_stdout(stdout, self.max_stdout_chars)
             # 当 stdout 为空时，补充诊断信息帮助 LLM 定位问题
             if not stdout:
                 diag_parts = [f"returncode={result.returncode}"]
