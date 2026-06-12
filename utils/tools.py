@@ -134,7 +134,8 @@ def _extract_first_json_object(text: str) -> str | None:
     start = s.find("{")
     if start < 0:
         return None
-    depth = 0
+    depth_brace = 0  # {} 深度
+    depth_bracket = 0  # [] 深度
     in_str = False
     escape = False
     for i in range(start, len(s)):
@@ -153,12 +154,19 @@ def _extract_first_json_object(text: str) -> str | None:
             in_str = True
             continue
         if ch == "{":
-            depth += 1
+            depth_brace += 1
             continue
         if ch == "}":
-            depth -= 1
-            if depth == 0:
+            depth_brace -= 1
+            if depth_brace == 0 and depth_bracket == 0:
                 return s[start : i + 1]
+            continue
+        if ch == "[":
+            depth_bracket += 1
+            continue
+        if ch == "]":
+            depth_bracket -= 1
+            continue
     return None
 
 def _normalize_small_reply(text: str) -> str:
@@ -285,7 +293,60 @@ def _parse_tool_call(tool_call: Any) -> tuple[str | None, str | None, dict[str, 
             )
         except Exception:
             pass
-        return call_id, name, {}
+        return call_id, name, {"_raw_args_fallback": raw_args}
+
+def _detect_model_supports_fc(model_config: Any) -> bool:
+    """检测模型是否支持 function calling。
+    
+    参考 Hermes 三种 API 模式适配：通过 model_config 的 provider/mode 字段判断。
+    已知不支持 FC 的模型/模式返回 False，其余默认返回 True（乐观假设）。
+    """
+    if model_config is None:
+        return True
+    provider = None
+    mode = None
+    model_name = ""
+    if isinstance(model_config, dict):
+        provider = str(model_config.get("provider") or "").lower()
+        mode = str(model_config.get("mode") or "").lower()
+        model_name = str(model_config.get("model") or "").lower()
+    else:
+        provider = str(_safe_get(model_config, "provider") or "").lower()
+        mode = str(_safe_get(model_config, "mode") or "").lower()
+        model_name = str(_safe_get(model_config, "model") or "").lower()
+
+    # mode 字段明确指示：chat/completion 模式通常支持 FC
+    # 某些 mode 值（如 "text"、"generate"）明确不支持
+    if mode in ("text", "generate", "completion"):
+        return False
+
+    # 已知不支持 FC 的模型名称模式（小模型通常 FC 能力差）
+    _no_fc_patterns = (
+        "qwen1.5-0.5b", "qwen1.5-1.8b", "qwen2-0.5b", "qwen2-1.5b",
+        "llama-3.2-1b", "llama-3.2-3b", "gemma-2b", "gemma-2-2b",
+        "phi-1", "phi-1.5", "tinyllama", "minicpm",
+    )
+    for pattern in _no_fc_patterns:
+        if pattern in model_name:
+            return False
+
+    return True
+
+
+def _estimate_tokens(text: str) -> int:
+    """估算文本的 token 数量。
+    
+    参考 Hermes 上下文管理：中文约 1.5 字符/token，英文约 4 字符/token。
+    混合文本取中间值 2 字符/token 作为粗略估算。
+    """
+    if not text:
+        return 0
+    # 统计中文字符数
+    cn_chars = sum(1 for ch in text if '\u4e00' <= ch <= '\u9fff')
+    other_chars = len(text) - cn_chars
+    # 中文 1.5 字符/token，其他 4 字符/token
+    return int(cn_chars / 1.5) + int(other_chars / 4) + 1
+
 
 PromptToolT = TypeVar("PromptToolT")
 
