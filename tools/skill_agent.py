@@ -68,6 +68,7 @@ class SkillAgentTool(Tool):
         _verbose_raw = tool_parameters.get("verbose")
         verbose = _verbose_raw not in (False, "false", "False", 0, "0")
         skills_root = _detect_skills_root(tool_parameters.get("skills_root"))
+        storage = self.session.storage
         custom_variables_raw = tool_parameters.get("custom_variables") or ""
         custom_variables: dict[str, str] = {}
         if isinstance(custom_variables_raw, str) and custom_variables_raw.strip():
@@ -83,7 +84,6 @@ class SkillAgentTool(Tool):
             return
         user_input = str(query)
 
-        storage = self.session.storage
         resume_key = _get_resume_storage_key(self.session)
         history_key = _get_history_storage_key(self.session)
         session_dir_key = _get_session_dir_storage_key(self.session)
@@ -92,8 +92,7 @@ class SkillAgentTool(Tool):
         is_resuming = False
 
         plugin_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        # temp 目录放在插件目录外的持久化路径，避免升级时丢失
-        temp_root = os.path.join(os.path.dirname(plugin_root), "skill_agent_data", "temp")
+        temp_root = os.path.join(plugin_root, "temp")
         os.makedirs(temp_root, exist_ok=True)
         persisted_session_dir = _storage_get_text(storage, session_dir_key).strip()
         if persisted_session_dir and os.path.isdir(persisted_session_dir):
@@ -348,6 +347,8 @@ class SkillAgentTool(Tool):
         final_file_meta: dict[str, dict[str, str]] = {}
         empty_responses = 0
         tool_result_echo_count = 0  # TOOL_RESULT 回声检测计数，防止无限循环
+        validation_failure_streak = 0  # 连续参数校验失败计数
+        VALIDATION_FAILURE_MAX = 2  # 连续校验失败超过此值则提前退出
         saved_asset_fingerprints: set[str] = set()
         resume_saved = False
         final_text_already_streamed = False
@@ -584,15 +585,41 @@ class SkillAgentTool(Tool):
             yield self.create_text_message(f"{icon} {label} {desc}\n")
 
         def emit_tool_result(tool_name: str, result: Any) -> Generator[ToolInvokeMessage]:
-            """verbose 模式下，工具执行完后展示简短结果摘要。"""
-            if not verbose:
-                return
+            """工具执行完后展示简短结果摘要。
+            
+            部分工具（如 list_installed_skills）无论 verbose 是否开启都展示结果，
+            确保用户能看到关键信息，避免 LLM 未生成最终文本时用户一无所获。
+            """
             if not isinstance(result, dict):
                 return
-            # 出错时展示简短错误提示
+            # 出错时展示简短错误提示（始终展示）
             err = result.get("error")
             if err:
                 yield self.create_text_message(f"  ⚠️ {err}\n")
+                return
+            # ── 始终展示结果的工具（不受 verbose 限制） ──
+            if tool_name == "list_installed_skills":
+                count = result.get("skills_count", 0)
+                skills_list = result.get("skills") or []
+                if count == 0:
+                    yield self.create_text_message("  📭 当前未安装任何技能\n")
+                else:
+                    yield self.create_text_message(f"  ✔️ 已安装 {count} 个技能：\n")
+                    for s in skills_list[:30]:
+                        if isinstance(s, dict):
+                            name = s.get("name") or s.get("folder") or ""
+                            desc = (s.get("description") or "")[:60]
+                            has_md = "✔" if s.get("has_skill_md") else "✘"
+                            line = f"    • {name}"
+                            if desc:
+                                line += f" — {desc}"
+                            line += f"  [{has_md} SKILL.md]"
+                            yield self.create_text_message(line + "\n")
+                    if len(skills_list) > 30:
+                        yield self.create_text_message(f"    … 还有 {len(skills_list) - 30} 个技能未展示\n")
+                return
+            # ── 以下仅在 verbose 模式下展示 ──
+            if not verbose:
                 return
             # 按工具类型展示关键结果
             if tool_name == "get_skill_metadata":
@@ -625,9 +652,6 @@ class SkillAgentTool(Tool):
             elif tool_name == "install_skill":
                 skill = result.get("skill", "")
                 yield self.create_text_message(f"  ✔️ 技能《{skill}》安装成功\n")
-            elif tool_name == "list_installed_skills":
-                count = result.get("skills_count", 0)
-                yield self.create_text_message(f"  ✔️ 已安装 {count} 个技能\n")
             elif tool_name == "uninstall_skill":
                 skill = result.get("skill", "")
                 yield self.create_text_message(f"  ✔️ 技能《{skill}》已卸载\n")
@@ -923,13 +947,14 @@ class SkillAgentTool(Tool):
 
                         ok_args, arg_detail = _validate_tool_arguments(tool_name, arguments)
                         if not ok_args:
+                            validation_failure_streak += 1
                             result = {
                                 "error": "invalid_tool_arguments",
                                 "tool": tool_name,
                                 "detail": arg_detail,
                                 "got": arguments,
                             }
-                            _dbg(f"tool_result name={tool_name} result={_shorten_text(result, 700)}")
+                            _dbg(f"tool_result name={tool_name} result={_shorten_text(result, 700)} streak={validation_failure_streak}")
                             messages.append(
                                 ToolPromptMessage(
                                     tool_call_id=str(call_id or ""),
@@ -937,6 +962,11 @@ class SkillAgentTool(Tool):
                                     content=json.dumps(result, ensure_ascii=False),
                                 )
                             )
+                            # 连续校验失败超过阈值，提前退出避免耗尽 max_steps
+                            if validation_failure_streak > VALIDATION_FAILURE_MAX:
+                                forced_text = f"❗ 连续 {validation_failure_streak} 次工具参数校验失败，已停止重试。请检查工具调用参数是否符合 schema 要求。"
+                                _dbg(f"validation_failure_streak exceeded, breaking")
+                                break
                             messages.append(UserPromptMessage(content=_tool_call_retry_prompt(tool_name, arg_detail)))
                             continue
 
@@ -971,6 +1001,7 @@ class SkillAgentTool(Tool):
                         yield from emit_tool_progress(tool_name, _tp_detail)
 
                         result = _execute_tool(tool_name, arguments)
+                        validation_failure_streak = 0  # 工具成功执行，重置连续失败计数
                         _forced = yield from _handle_command_result(tool_name, result)
                         if _forced:
                             forced_text = _forced
@@ -1081,19 +1112,25 @@ class SkillAgentTool(Tool):
 
                 ok_args, arg_detail = _validate_tool_arguments(name, arguments)
                 if not ok_args:
-                    messages.append(UserPromptMessage(content=_tool_call_retry_prompt(name, arg_detail)))
+                    validation_failure_streak += 1
                     result = {
                         "error": "invalid_tool_arguments",
                         "tool": name,
                         "detail": arg_detail,
                         "got": arguments,
                     }
-                    _dbg(f"json_tool_result name={name} result={_shorten_text(result, 700)}")
+                    _dbg(f"json_tool_result name={name} result={_shorten_text(result, 700)} streak={validation_failure_streak}")
                     messages.append(
                         UserPromptMessage(
                             content="[ToolResult] " + json.dumps({"name": name, "result": result}, ensure_ascii=False)
                         )
                     )
+                    # 连续校验失败超过阈值，提前退出避免耗尽 max_steps
+                    if validation_failure_streak > VALIDATION_FAILURE_MAX:
+                        final_text = f"❗ 连续 {validation_failure_streak} 次工具参数校验失败，已停止重试。请检查工具调用参数是否符合 schema 要求。"
+                        _dbg(f"validation_failure_streak exceeded (json path), breaking")
+                        break
+                    messages.append(UserPromptMessage(content=_tool_call_retry_prompt(name, arg_detail)))
                     continue
 
                 if name in {"list_skill_files", "read_skill_file", "run_skill_command"}:
@@ -1128,6 +1165,7 @@ class SkillAgentTool(Tool):
                 yield from emit_tool_progress(name, _j_detail)
 
                 result = _execute_tool(name, arguments)
+                validation_failure_streak = 0  # 工具成功执行，重置连续失败计数
                 _forced = yield from _handle_command_result(name, result)
                 if _forced:
                     forced_text = _forced

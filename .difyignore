@@ -185,4 +185,5 @@ Thumbs.db
 temp/
 skills/
 screenshot_*.png
+dify-plugin-*
 

@@ -20,16 +20,12 @@ def _detect_skills_root(explicit_path: str | None) -> str | None:
     if env_path and os.path.isdir(env_path):
         return os.path.abspath(env_path)
 
+    # 使用插件包内的 skills/ 目录，升级插件后需重新安装技能
     plugin_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    legacy_root = os.path.join(plugin_root, "skills")
-
-    # 使用插件目录内的 skills/ 路径
-    if os.path.isdir(legacy_root) and os.listdir(legacy_root):
-        return os.path.abspath(legacy_root)
-
-    # 不存在或为空时，创建 skills/ 目录并返回
-    os.makedirs(legacy_root, exist_ok=True)
-    return os.path.abspath(legacy_root)
+    skills_dir = os.path.join(plugin_root, "skills")
+    if not os.path.isdir(skills_dir):
+        os.makedirs(skills_dir, exist_ok=True)
+    return os.path.abspath(skills_dir)
 
 
 def _cleanup_old_temp_sessions(temp_root: str, *, keep: int, protect_dirs: set[str] | None = None) -> None:

@@ -291,7 +291,8 @@ class _AgentRuntime:
                     "stderr": stderr,
                     "_diagnostic": " | ".join(diag_parts),
                 }
-            return {"returncode": result.returncode, "stdout": stdout, "stderr": stderr}
+            # 返回 cwd 帮助 LLM 定位脚本输出文件的目录
+            return {"returncode": result.returncode, "stdout": stdout, "stderr": stderr, "cwd": cwd}
         except FileNotFoundError as e:
             return {"error": "executable_not_found", "exe": str(command[0] or exe), "exception": str(e)}
         except Exception as e:
@@ -352,7 +353,7 @@ class _AgentRuntime:
                     "stderr": stderr,
                     "_diagnostic": " | ".join(diag_parts),
                 }
-            return {"returncode": result.returncode, "stdout": stdout, "stderr": stderr}
+            return {"returncode": result.returncode, "stdout": stdout, "stderr": stderr, "cwd": cwd}
         except FileNotFoundError as e:
             return {"error": "executable_not_found", "exe": str(command[0] or exe), "exception": str(e)}
         except Exception as e:
