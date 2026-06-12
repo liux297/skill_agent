@@ -4,6 +4,7 @@ import json
 import mimetypes
 import os
 import re
+import sys
 import uuid
 from typing import Any, TypeVar
 from urllib.parse import urlparse
@@ -268,6 +269,7 @@ def _parse_tool_call(tool_call: Any) -> tuple[str | None, str | None, dict[str, 
                     },
                     400,
                 ),
+                file=sys.stderr,
                 flush=True,
             )
         except Exception:
@@ -289,6 +291,7 @@ def _parse_tool_call(tool_call: Any) -> tuple[str | None, str | None, dict[str, 
                     },
                     400,
                 ),
+                file=sys.stderr,
                 flush=True,
             )
         except Exception:

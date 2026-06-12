@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 from utils.tools import _safe_get
 
 
 def _dbg(msg: str) -> None:
+    """输出调试日志到 stderr，避免被 plugin_daemon 的 stdio 协议误判为非法 JSON。"""
     try:
-        print(f"[skill][debug] {msg}", flush=True)
+        print(f"[skill][debug] {msg}", file=sys.stderr, flush=True)
     except Exception:
         return
 
