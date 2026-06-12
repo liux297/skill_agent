@@ -55,6 +55,11 @@ jobs:
           echo "\nDirectory structure:"
           tree || ls -R
 
+      - name: Upload package to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ steps.package.outputs.package_name }}
+
       - name: Checkout target repo
         uses: actions/checkout@v3
         with:
