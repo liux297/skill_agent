@@ -2,17 +2,17 @@ identity:
   name: "tm"
   author: "liux297"
   label:
-    en_US: "skill manager"
     zh_Hans: "技能管理"
-    pt_BR: "skill manager"
+    en_US: "skill manager"
     ja_JP: "skill manager"
+    pt_BR: "skill manager"
 description:
   human:
-    en_US: "Manage local skill packages (add/delete/list/download)."
-    zh_Hans: "管理本地 skills 技能包：新增/删除/查看/下载"
-    pt_BR: "Gerenciar pacotes de habilidades locais (adicionar/remover/visualizar/baixar)."
-    ja_JP: "ローカルのスキルパッケージを管理（追加/削除/表示/ダウンロード）"
-  llm: "Manage local skill packages (add/delete/list/download)"
+    zh_Hans: "管理本地 skills 技能包：新增、删除、查看、下载。"
+    en_US: "Manage local skill packages: add, delete, list, download."
+    ja_JP: "ローカルのスキルパッケージを管理（追加/削除/表示/ダウンロード）。"
+    pt_BR: "Gerenciar pacotes de habilidades locais: adicionar, remover, listar, baixar."
+  llm: "Manage local skill packages: add, delete, list, download."
 parameters:
   - name: command
     type: string

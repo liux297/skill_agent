@@ -2,15 +2,15 @@ identity:
   author: "liux297"
   name: "skill_agent"
   label:
-    en_US: "Skill_Agent"
     zh_Hans: "Skill_Agent"
-    pt_BR: "Skill_Agent"
+    en_US: "Skill_Agent"
     ja_JP: "Skill_Agent"
+    pt_BR: "Skill_Agent"
   description:
-    en_US: "Skill_Agent is an Agent plugin that can execute tasks based on the Skill progressive disclosure mode."
-    zh_Hans: "可基于Skill渐进式披露模式执行任务的Agent插件"
-    pt_BR: "Skill_Agent é um plugin de Agent que pode executar tarefas com base no modo de divulgação progressiva de Skill."
-    ja_JP: "Skill_Agent は、Skill 進化的披露モードに基づいてタスクを実行できる Agent プラグインです。"
+    zh_Hans: "基于 Skill 渐进式披露模式执行任务的通用型 Agent 插件，支持自定义变量注入与文件交付。"
+    en_US: "General-purpose Agent plugin that executes tasks based on the Skill progressive disclosure mode, with custom_variables injection and file delivery."
+    ja_JP: "Skill 漸進的開示モードに基づいてタスクを実行する汎用的な Agent プラグイン。"
+    pt_BR: "Plugin de Agent de uso geral que executa tarefas com base no modo de divulgação progressiva de Skills."
   icon: "skill.svg"
 
 #########################################################################################
