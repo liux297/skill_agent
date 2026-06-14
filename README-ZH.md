@@ -5,11 +5,9 @@
 **类型：** Tool（工具插件）
 **许可证：** Apache-2.0
 
-### 致谢与来源说明
+### 致谢
 
-本插件是基于 [lfenghx 的 Skill Agent](https://github.com/lfenghx/skill_agent)（原许可证 Apache-2.0）的衍生作品。我们衷心感谢原作者提供的优秀基础。
-
-如果原作者对本衍生作品有任何疑议，请通过 297218348@qq.com 及时联系我们，我们将立即处理。
+基于 [lfenghx 的 Skill Agent](https://github.com/lfenghx/skill_agent)（Apache-2.0）开发。
 
 ### 本版新增功能
 

@@ -5,11 +5,9 @@
 **Type:** Tool (Plugin)
 **License:** Apache-2.0
 
-### Acknowledgements & Origin
+### Acknowledgements
 
-This plugin is a derivative work based on [Skill Agent by lfenghx](https://github.com/lfenghx/skill_agent) (originally licensed under Apache-2.0). We extend our sincere thanks to the original author for the excellent foundation.
-
-If the original author has any concerns about this derivative work, please contact us promptly at 297218348@qq.com and we will address them immediately.
+Based on [Skill Agent by lfenghx](https://github.com/lfenghx/skill_agent) (Apache-2.0).
 
 ### What's New in This Version
 
@@ -134,8 +132,8 @@ Pass a JSON string like `{"current_user":"Alice","team_id":"T123"}` in the `cust
 
 ### Author & Contact
 
+- **Author:** [liux297](https://github.com/liux297)
 - **Email:** 297218348@qq.com
-- **Original Author:** [lfenghx](https://github.com/lfenghx) — we gratefully build upon their work under the Apache-2.0 license
 
 ### License
 
@@ -155,4 +153,4 @@ limitations under the License.
 
 ---
 
-**Original work copyright:** Copyright (c) 2026 lfenghx — see [original repository](https://github.com/lfenghx/skill_agent) for details.
+**Original work:** Copyright (c) 2026 lfenghx — [original repository](https://github.com/lfenghx/skill_agent)
