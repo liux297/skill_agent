@@ -1,7 +1,7 @@
 ## Skill Agent
 
 **Author / 作者：** [liux297](https://github.com/liux297)
-**Version / 版本：** 0.1.0 | **Type / 类型：** Tool (Plugin) | **License / 许可证：** Apache-2.0
+**Version / 版本：** 0.2.4 | **Type / 类型：** Tool (Plugin) | **License / 许可证：** Apache-2.0
 
 ---
 
