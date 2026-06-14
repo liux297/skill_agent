@@ -2,6 +2,7 @@ version: 0.2.3
 type: plugin
 author: liux297
 name: skill_agent
+repo: https://github.com/liux297/skill_agent
 label:
   en_US: Skill_Agent
   ja_JP: Skill_Agent
