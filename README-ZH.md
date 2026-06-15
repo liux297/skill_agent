@@ -20,7 +20,7 @@
 
 ### 简介
 
-Skill Agent 是一个基于 "Skill 渐进式披露（Progressive Disclosure）" 设计的通用型工具插件。它把本地 `skills/` 目录当作"工具箱"，让大模型在需要时逐步读取技能说明、再按需读取文件/执行脚本，最终生成文本或文件交付。
+Skill Agent 是一个基于 "Skill 渐进式披露（Progressive Disclosure）" 设计的通用型工具插件，参考/借鉴 OpenClaw 与 Hermes 的 Agent 架构设计。它把本地 `skills/` 目录当作"工具箱"，让大模型在需要时逐步读取技能说明、再按需读取文件/执行脚本，最终生成文本或文件交付。
 
 ### 适用场景
 

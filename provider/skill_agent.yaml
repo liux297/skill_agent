@@ -7,10 +7,10 @@ identity:
     ja_JP: "Skill_Agent"
     pt_BR: "Skill_Agent"
   description:
-    zh_Hans: "基于 Skill 渐进式披露模式执行任务的通用型 Agent 插件，支持自定义变量注入与文件交付。"
-    en_US: "General-purpose Agent plugin that executes tasks based on the Skill progressive disclosure mode, with custom_variables injection and file delivery."
-    ja_JP: "Skill 漸進的開示モードに基づいてタスクを実行する汎用的な Agent プラグイン。"
-    pt_BR: "Plugin de Agent de uso geral que executa tarefas com base no modo de divulgação progressiva de Skills."
+    zh_Hans: "基于 Skill 渐进式披露模式构建的通用型 Agent 插件，参考/借鉴 OpenClaw 与 Hermes 的 Agent 架构，支持自定义变量注入、文件交付与跨轮次交互。"
+    en_US: "General-purpose Agent plugin built on the Skill Progressive Disclosure pattern, with references to OpenClaw and Hermes agent architectures, supporting custom_variables injection, file delivery and cross-turn interaction."
+    ja_JP: "Skill 漸進的開示パターンに基づく汎用的な Agent プラグイン。OpenClaw および Hermes の Agent アーキテクチャを参考にしています。"
+    pt_BR: "Plugin de Agent de uso geral baseado no padrão de Divulgação Progressiva de Skills, com referência às arquiteturas de agent OpenClaw e Hermes."
   icon: "skill.svg"
 
 #########################################################################################

@@ -10,18 +10,21 @@ label:
   pt_BR: Skill_Agent
 description:
   zh_Hans: >-
-    Skill_Agent 是基于 Skill 渐进式披露模式构建的通用型 Agent 插件。把本地 skills/ 目录当作"工具箱"，
-    支持自定义变量注入、文件交付与流式对话输出，具备模型能力自动检测（Function Calling 与 JSON 协议自动切换）、
-    统一工具执行管线、基于 Token 估算的上下文智能压缩与自动恢复、JSON 智能压缩、命令白名单安全沙箱等特性。
-    技能通过 SKILL.md（含 YAML frontmatter）热插拔，可跨轮次交互。
+    Skill_Agent 是基于 Skill 渐进式披露模式构建的通用型 Agent 插件，
+    参考/借鉴 OpenClaw 与 Hermes 的 Agent 架构设计。把本地 skills/ 目录当作"工具箱"，
+    支持自定义变量注入、文件交付与流式对话输出，具备模型能力自动检测
+    （Function Calling 与 JSON 协议自动切换）、统一工具执行管线、
+    基于 Token 估算的上下文智能压缩与自动恢复、JSON 智能压缩、
+    命令白名单安全沙箱等特性。技能通过 SKILL.md（含 YAML frontmatter）热插拔，可跨轮次交互。
   en_US: >-
     Skill_Agent is a general-purpose Agent plugin built on the Skill Progressive
-    Disclosure pattern. It treats the local skills/ directory as a toolbox, supports
-    custom_variables injection, file delivery and streaming output, and features
-    adaptive model capability detection (auto-switching between Function Calling and
-    JSON protocol), unified tool execution pipeline, token-aware context compaction
-    with auto-recovery, smart JSON compression, and a command whitelist sandbox for
-    safe script execution. Skills are hot-pluggable via SKILL.md with YAML frontmatter.
+    Disclosure pattern, with references to OpenClaw and Hermes agent architectures.
+    It treats the local skills/ directory as a toolbox, supports custom_variables
+    injection, file delivery and streaming output, and features adaptive model
+    capability detection (auto-switching between Function Calling and JSON protocol),
+    unified tool execution pipeline, token-aware context compaction with auto-recovery,
+    smart JSON compression, and a command whitelist sandbox for safe script execution.
+    Skills are hot-pluggable via SKILL.md with YAML frontmatter.
   ja_JP: >-
     Skill_Agent は、Skill 漸進的開示パターンに基づく汎用的な Agent プラグインです。
     ローカル skills/ ディレクトリを"ツールボックス"として扱い、カスタム変数の注入、
