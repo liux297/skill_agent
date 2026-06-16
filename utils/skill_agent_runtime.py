@@ -9,7 +9,6 @@ import sys
 import zipfile
 from typing import Any
 
-from utils.skill_agent_constants import ALLOWED_COMMANDS
 from utils.skill_agent_exec import (
     _ensure_python_module,
     _missing_executable_hint,
@@ -87,6 +86,7 @@ class _AgentRuntime:
         memory_turns: int,
         custom_variables: dict[str, str] | None = None,
         max_stdout_chars: int = 30000,
+        allowed_commands: set[str],  # 由调用方传入（yaml 默认值或用户自定义）
     ) -> None:
         self.skills_root = skills_root
         self.session_dir = session_dir
@@ -94,6 +94,7 @@ class _AgentRuntime:
         self.memory_turns = memory_turns
         self.custom_variables = custom_variables or {}
         self.max_stdout_chars = max_stdout_chars
+        self.allowed_commands = allowed_commands
         self._skill_metadata_cache: dict[str, dict[str, Any]] = {}
         self._skill_files_listed: set[str] = set()
 
@@ -251,7 +252,7 @@ class _AgentRuntime:
                     if not module_check.get("ok"):
                         return module_check
             command = [sys.executable] + command[1:]
-        elif exe not in ALLOWED_COMMANDS:
+        elif exe not in self.allowed_commands:
             return {"error": f"command not allowed: {exe}"}
         resolved0 = _resolve_executable(str(command[0] or ""))
         if not resolved0:
@@ -313,7 +314,7 @@ class _AgentRuntime:
                     if not module_check.get("ok"):
                         return module_check
             command = [sys.executable] + command[1:]
-        elif exe not in ALLOWED_COMMANDS:
+        elif exe not in self.allowed_commands:
             return {"error": f"command not allowed: {exe}"}
         resolved0 = _resolve_executable(str(command[0] or ""))
         if not resolved0:

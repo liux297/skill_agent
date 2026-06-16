@@ -67,6 +67,13 @@ class SkillAgentTool(Tool):
         # 详细模式开关：控制是否向用户展示工具调用/执行细节（调试时开启，面向用户时可关闭）
         _verbose_raw = tool_parameters.get("verbose")
         verbose = _verbose_raw not in (False, "false", "False", 0, "0")
+
+        # 解析命令白名单：逗号分隔字符串 → 集合（yaml 已配置默认值）
+        allowed_commands_raw = tool_parameters.get("allowed_commands") or ""
+        allowed_commands: set[str] = set()
+        if isinstance(allowed_commands_raw, str) and allowed_commands_raw.strip():
+            allowed_commands = {cmd.strip().lower() for cmd in allowed_commands_raw.split(",") if cmd.strip()}
+
         skills_root = _detect_skills_root(tool_parameters.get("skills_root"))
         storage = self.session.storage
         custom_variables_raw = tool_parameters.get("custom_variables") or ""
@@ -200,6 +207,7 @@ class SkillAgentTool(Tool):
             memory_turns=memory_turns,
             custom_variables=custom_variables,
             max_stdout_chars=max_stdout_chars,
+            allowed_commands=allowed_commands,
         )
 
         history_messages: list[Any] = []

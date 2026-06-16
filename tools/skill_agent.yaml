@@ -179,6 +179,23 @@ parameters:
       ja_JP: "コマンド出力の最大文字数。小さいコンテキストモデルでは下げてください。"
     llm_description: "Max characters for command stdout before compression/truncation."
     form: form
+
+  - name: allowed_commands
+    type: string
+    required: false
+    default: "python,python3,pip,pip3,node,pandoc,soffice,pdftoppm,npm,npx,bun,curl,uvx,wget,git,bash,sh,uv,/bin/bash,/bin/sh"
+    label:
+      en_US: Allowed Commands
+      zh_Hans: 允许的命令
+      pt_BR: Comandos permitidos
+      ja_JP: 許可コマンド
+    human_description:
+      en_US: "Comma-separated list of allowed commands. Edit this list to control which commands the agent can execute."
+      zh_Hans: "允许执行的命令列表，用逗号分隔。直接编辑此字段即可增删允许的命令。"
+      pt_BR: "Lista de comandos permitidos, separados por vírgula."
+      ja_JP: "許可するコマンドリスト（カンマ区切り）。このフィールドを編集して許可コマンドを管理。"
+    llm_description: "Comma-separated list of allowed commands that the agent can execute via run_skill_command/run_temp_command."
+    form: form
 extra:
   python:
     source: tools/skill_agent.py
