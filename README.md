@@ -1,7 +1,7 @@
 ## Skill Agent
 
 **Author:** [liux297](https://github.com/liux297) · 297218348@qq.com
-**Version:** 0.2.5 | **Type:** Tool Plugin | **License:** Apache-2.0
+**Version:** 0.2.7 | **Type:** Tool Plugin | **License:** Apache-2.0
 **Repository:** https://github.com/liux297/skill_agent
 
 ---
@@ -12,22 +12,14 @@ Skill Agent is a general-purpose tool plugin built on the **Skill Progressive Di
 
 ---
 
-### What's New in v0.2.5
+### What's New in v0.2.6
 
-- **Custom Variables (`custom_variables`)** — Inject JSON key-value pairs into the agent context. Skills access them via `get_session_context()`. Supports `${var}` template replacement in SKILL.md and environment variable injection for subprocess commands.
-- **Verbose Mode (`verbose`)** — Toggle between detailed tool execution progress (for debugging) and clean user-facing output (for production).
-- **Custom System Prompt (`system_prompt`)** — Override or extend the default agent behavior instructions.
-- **Optimized Progressive Disclosure** — When SKILL.md already specifies an executable entry point, the agent executes directly without redundant `list_skill_files` calls.
-- **Smart Command Coercion** — Automatically converts string commands to arrays and strips backticks accidentally copied from Markdown code blocks.
-- **Structured Output Formatting** — JSON results from commands are automatically converted to structured natural-language summaries.
-- **Enhanced Diagnostics** — Improved error messages for DNS/network failures and empty stdout to help the LLM self-diagnose issues.
-- **Model Capability Detection** — Adaptive detection of model function-calling support, with automatic fallback between Function Calling and JSON protocol (inspired by OpenClaw/Hermes).
-- **Unified Tool Execution Pipeline** — Single execution path eliminates duplicate FC/JSON logic.
-- **Token-Aware Context Compaction** — Smart context compression based on token estimation with automatic recovery from context overflow.
-- **Smart JSON Compression** — Intelligent JSON summarization replaces naive truncation.
-- **Streaming Output with Protocol Filtering** — Real-time natural-language streaming while internal JSON protocol messages are hidden from users.
-- **Step-by-Step Process Visualization** — Categorized icons, step numbering, and configurable verbose toggle.
-- **Command Whitelist Sandbox** — Secure script execution within a configurable command whitelist.
+- **Dual Protocol智能切换**：自动检测模型 FC 能力，兼容 Function Calling 和 JSON 协议两种模式
+- **渐进式披露优化**：先用技能索引判断，再读取 SKILL.md，再按需读文件/执行命令，避免冗余操作
+- **上下文智能压缩**：基于 token 估算的上下文管理与自动恢复机制
+- **命令白名单沙箱**：安全的脚本执行控制，防止危险命令执行
+- **文件交付机制**：Agent 结束时会把 temp 会话目录中的文件作为文件输出返回
+- **流式对话输出**：支持实时自然语言流式输出，隐藏内部协议消息
 
 ---
 
@@ -106,7 +98,14 @@ The `custom_variables` parameter accepts a JSON object of key-value pairs that w
 
 ### Changelog
 
-**v0.2.5 (current):**
+**v0.2.7 (current):**
+1. Added multilingual README support (`readme/README_zh_Hans.md`) for Dify Marketplace language switching
+2. Dual-protocol smart switching: auto-detects model FC capability, compatible with both Function Calling and JSON protocols
+3. Token-aware context compaction with automatic overflow recovery
+4. Command whitelist sandbox for secure script execution
+5. Streaming output with internal protocol filtering
+
+**v0.2.5:**
 1. `custom_variables` JSON key-value injection with template replacement and environment variable pass-through
 2. `verbose` mode toggle for debug or user-facing output
 3. `system_prompt` parameter to override default agent instructions
