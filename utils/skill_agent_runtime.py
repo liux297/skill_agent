@@ -222,6 +222,60 @@ class _AgentRuntime:
             "custom_variables": self.custom_variables,
         }
 
+    def _execute_command(
+        self,
+        *,
+        command: list[str],
+        cwd: str,
+        exe_fallback: str = "",
+    ) -> dict[str, Any]:
+        """公共命令执行逻辑：解析可执行文件、重写路径、执行子进程、处理输出。
+
+        被 run_skill_command 和 run_temp_command 共用，消除约 80% 的重复代码。
+        """
+        resolved0 = _resolve_executable(str(command[0] or ""))
+        if not resolved0:
+            missing = str(command[0] or exe_fallback)
+            return {"error": "executable_not_found", "exe": missing, "hint": _missing_executable_hint(missing)}
+        command = [resolved0] + command[1:]
+        command = _rewrite_uploads_paths_to_session_dir(command, session_dir=self.session_dir)
+        command = _rewrite_existing_session_files_to_abs(command, session_dir=self.session_dir)
+        env = self._build_subprocess_env()
+        try:
+            result = subprocess.run(
+                command,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+                env=env,
+                timeout=300,
+            )
+            stdout = result.stdout.strip()
+            stderr = result.stderr.strip()
+            stdout = _try_compress_stdout(stdout, self.max_stdout_chars)
+            if not stdout:
+                diag_parts = [f"returncode={result.returncode}"]
+                if stderr:
+                    diag_parts.append(f"stderr={stderr}")
+                else:
+                    diag_parts.append("(stderr also empty)")
+                diag_parts.append(f"command={' '.join(command)}")
+                return {
+                    "returncode": result.returncode,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "_diagnostic": " | ".join(diag_parts),
+                }
+            return {"returncode": result.returncode, "stdout": stdout, "stderr": stderr, "cwd": cwd}
+        except FileNotFoundError as e:
+            return {"error": "executable_not_found", "exe": str(command[0] or exe_fallback), "exception": str(e)}
+        except subprocess.TimeoutExpired as e:
+            return {"error": "command_timeout", "exe": str(command[0] or exe_fallback), "timeout_seconds": 300, "exception": f"命令执行超过 300 秒超时: {str(e)}"}
+        except Exception as e:
+            return {"error": "subprocess_failed", "exe": str(command[0] or exe_fallback), "exception": str(e)}
+
     def run_skill_command(
         self,
         *,
@@ -254,50 +308,10 @@ class _AgentRuntime:
             command = [sys.executable] + command[1:]
         elif exe not in self.allowed_commands:
             return {"error": f"command not allowed: {exe}"}
-        resolved0 = _resolve_executable(str(command[0] or ""))
-        if not resolved0:
-            missing = str(command[0] or exe)
-            return {"error": "executable_not_found", "exe": missing, "hint": _missing_executable_hint(missing)}
-        command = [resolved0] + command[1:]
-        command = _rewrite_uploads_paths_to_session_dir(command, session_dir=self.session_dir)
-        command = _rewrite_existing_session_files_to_abs(command, session_dir=self.session_dir)
+        # 技能命令额外重写 --out 参数到 session_dir
         command = _rewrite_out_arg_to_session_dir(command, session_dir=self.session_dir)
         cwd = skill_path if not cwd_relative else _safe_join(skill_path, cwd_relative)
-        env = self._build_subprocess_env()
-        try:
-            result = subprocess.run(
-                command,
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="ignore",
-                env=env,
-            )
-            stdout = result.stdout.strip()
-            stderr = result.stderr.strip()
-            # 智能截断：优先尝试 JSON 压缩（移除大字段），而非简单截断
-            stdout = _try_compress_stdout(stdout, self.max_stdout_chars)
-            # 当 stdout 为空时，补充诊断信息帮助 LLM 定位问题
-            if not stdout:
-                diag_parts = [f"returncode={result.returncode}"]
-                if stderr:
-                    diag_parts.append(f"stderr={stderr}")
-                else:
-                    diag_parts.append("(stderr also empty)")
-                diag_parts.append(f"command={' '.join(command)}")
-                return {
-                    "returncode": result.returncode,
-                    "stdout": stdout,
-                    "stderr": stderr,
-                    "_diagnostic": " | ".join(diag_parts),
-                }
-            # 返回 cwd 帮助 LLM 定位脚本输出文件的目录
-            return {"returncode": result.returncode, "stdout": stdout, "stderr": stderr, "cwd": cwd}
-        except FileNotFoundError as e:
-            return {"error": "executable_not_found", "exe": str(command[0] or exe), "exception": str(e)}
-        except Exception as e:
-            return {"error": "subprocess_failed", "exe": str(command[0] or exe), "exception": str(e)}
+        return self._execute_command(command=command, cwd=cwd, exe_fallback=exe)
 
     def run_temp_command(
         self, *, command: list[str], cwd_relative: str | None = None, auto_install: bool = False
@@ -316,49 +330,9 @@ class _AgentRuntime:
             command = [sys.executable] + command[1:]
         elif exe not in self.allowed_commands:
             return {"error": f"command not allowed: {exe}"}
-        resolved0 = _resolve_executable(str(command[0] or ""))
-        if not resolved0:
-            missing = str(command[0] or exe)
-            return {"error": "executable_not_found", "exe": missing, "hint": _missing_executable_hint(missing)}
-        command = [resolved0] + command[1:]
-        command = _rewrite_uploads_paths_to_session_dir(command, session_dir=self.session_dir)
-        command = _rewrite_existing_session_files_to_abs(command, session_dir=self.session_dir)
         os.makedirs(self.session_dir, exist_ok=True)
         cwd = self.session_dir if not cwd_relative else _safe_join(self.session_dir, cwd_relative)
-        env = self._build_subprocess_env()
-        try:
-            result = subprocess.run(
-                command,
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="ignore",
-                env=env,
-            )
-            stdout = result.stdout.strip()
-            stderr = result.stderr.strip()
-            # 智能截断：优先尝试 JSON 压缩（移除大字段），而非简单截断
-            stdout = _try_compress_stdout(stdout, self.max_stdout_chars)
-            # 当 stdout 为空时，补充诊断信息帮助 LLM 定位问题
-            if not stdout:
-                diag_parts = [f"returncode={result.returncode}"]
-                if stderr:
-                    diag_parts.append(f"stderr={stderr}")
-                else:
-                    diag_parts.append("(stderr also empty)")
-                diag_parts.append(f"command={' '.join(command)}")
-                return {
-                    "returncode": result.returncode,
-                    "stdout": stdout,
-                    "stderr": stderr,
-                    "_diagnostic": " | ".join(diag_parts),
-                }
-            return {"returncode": result.returncode, "stdout": stdout, "stderr": stderr, "cwd": cwd}
-        except FileNotFoundError as e:
-            return {"error": "executable_not_found", "exe": str(command[0] or exe), "exception": str(e)}
-        except Exception as e:
-            return {"error": "subprocess_failed", "exe": str(command[0] or exe), "exception": str(e)}
+        return self._execute_command(command=command, cwd=cwd, exe_fallback=exe)
 
     def export_temp_file(
         self,
@@ -410,10 +384,27 @@ class _AgentRuntime:
             os.remove(dst)
         try:
             if src.lower().endswith(".zip"):
-                # zip 文件：解压到目标目录
+                # 安全解压：逐文件校验路径，防止 zip slip 路径穿越攻击
                 os.makedirs(dst, exist_ok=True)
                 with zipfile.ZipFile(src, "r") as zf:
-                    zf.extractall(dst)
+                    for info in zf.infolist():
+                        name = info.filename
+                        if not name:
+                            continue
+                        # 拒绝绝对路径和 .. 路径穿越
+                        if name.startswith("/") or name.startswith("\\") or ".." in name:
+                            return {"error": "压缩包包含非法路径（可能为 zip slip 攻击）", "source": src}
+                        target_path = os.path.realpath(os.path.join(dst, name))
+                        # 确保解压目标仍在 dst 目录内
+                        if not target_path.startswith(os.path.realpath(dst) + os.sep):
+                            return {"error": "压缩包包含越权路径（可能为 zip slip 攻击）", "source": src}
+                        if info.is_dir():
+                            os.makedirs(target_path, exist_ok=True)
+                        else:
+                            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                            with zf.open(info) as src_f, open(target_path, "wb") as dst_f:
+                                import shutil
+                                shutil.copyfileobj(src_f, dst_f)
             else:
                 # 目录：直接复制
                 shutil.copytree(src, dst)

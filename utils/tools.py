@@ -354,13 +354,14 @@ def _estimate_tokens(text: str) -> int:
 PromptToolT = TypeVar("PromptToolT")
 
 _PROMPT_MESSAGE_TOOLS: list[Any] | None = None
-_PROMPT_MESSAGE_TOOLS_CACHE_KEY: tuple[int, int] | None = None
+# 用对象长度 + 类型名作为缓存键（比 id() 更可靠，避免 GC 后重建导致缓存失效但不报错）
+_PROMPT_MESSAGE_TOOLS_CACHE_KEY: tuple[int, str, str] | None = None
 
 
 def _build_prompt_message_tools(tool_schemas: list[dict[str, Any]], tool_cls: type[PromptToolT]) -> list[PromptToolT]:
     global _PROMPT_MESSAGE_TOOLS, _PROMPT_MESSAGE_TOOLS_CACHE_KEY
 
-    cache_key = (id(tool_schemas), id(tool_cls))
+    cache_key = (len(tool_schemas), getattr(tool_cls, "__name__", ""), getattr(tool_cls, "__qualname__", ""))
     if _PROMPT_MESSAGE_TOOLS is not None and _PROMPT_MESSAGE_TOOLS_CACHE_KEY == cache_key:
         return _PROMPT_MESSAGE_TOOLS  # type: ignore[return-value]
 

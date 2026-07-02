@@ -63,7 +63,7 @@ class SkillAgentTool(Tool):
         memory_turns = int(tool_parameters.get("memory_turns") or 10)
         history_turns = int(tool_parameters.get("history_turns") or 0)
         max_stdout_chars = int(tool_parameters.get("max_stdout_chars") or 30000)
-        system_prompt = tool_parameters.get("system_prompt") or "你是一个xxxx"
+        system_prompt = tool_parameters.get("system_prompt") or "你是一个智能助手，能够使用 Skills 工具箱中的技能完成用户的各种任务。"
         # 详细模式开关：控制是否向用户展示工具调用/执行细节（调试时开启，面向用户时可关闭）
         _verbose_raw = tool_parameters.get("verbose")
         verbose = _verbose_raw not in (False, "false", "False", 0, "0")
@@ -317,7 +317,7 @@ class SkillAgentTool(Tool):
             + '{"type":"tool","name":"get_skill_metadata","arguments":{"skill_name":"xxx"}}\n'
             + '或 {"type":"final","content":"..."}\n\n'
             + "技能索引（用于判断是否需要调用技能）：\n"
-            + (lambda si: json.dumps(si, ensure_ascii=False) if len(json.dumps(si, ensure_ascii=False)) <= 8000 else json.dumps({"skills": si.get("skills", [])[:10], "truncated": True, "note": "技能索引过长已截断，请用 list_installed_skills 查看完整列表"}, ensure_ascii=False))(skills_index)
+            + (lambda si: (lambda s: s if len(s) <= 8000 else json.dumps({"skills": si.get("skills", [])[:10], "truncated": True, "note": "技能索引过长已截断，请用 list_installed_skills 查看完整列表"}, ensure_ascii=False))(json.dumps(si, ensure_ascii=False)))(skills_index)
             + (resume_context or "")
         )
 
@@ -463,9 +463,10 @@ class SkillAgentTool(Tool):
 
         def _handle_command_result(tool_name: str, result: dict) -> Generator[ToolInvokeMessage, None, str | None]:
             """处理命令执行结果，返回 forced_text（如需暂停让用户确认）。
-            
+
             参考 OpenClaw 两阶段协议：命令执行失败时可能需要用户授权续跑。
             """
+            nonlocal resume_saved  # 标记是否已保存了 resume 状态，避免 finally 中误清除
             forced_text = None
             if tool_name in ("run_skill_command", "run_temp_command"):
                 if (
@@ -480,7 +481,8 @@ class SkillAgentTool(Tool):
                         )
                 # run_skill_command 特殊处理：no_executable_found 时需要用户确认续跑
                 if tool_name == "run_skill_command" and isinstance(result, dict) and result.get("error") == "no_executable_found":
-                    skill = str(result.get("skill") or arguments.get("skill_name") or "")
+                    # 从 result 中取 skill/module，避免引用外层循环的 arguments 变量导致闭包延迟绑定问题
+                    skill = str(result.get("skill") or "")
                     module = str(result.get("module") or "")
                     if verbose:
                         forced_text = (
@@ -507,6 +509,7 @@ class SkillAgentTool(Tool):
                             "created_at": int(time.time()),
                         },
                     )
+                    resume_saved = True  # 标记已保存 resume 状态，finally 中不再误清除
                     _dbg(
                         "resume_state_saved "
                         + _shorten_text(
@@ -724,7 +727,8 @@ class SkillAgentTool(Tool):
                 dst = _safe_join(out_dir, filename)
                 if os.path.exists(dst):
                     base, ext = os.path.splitext(filename)
-                    dst = _safe_join(out_dir, f"{base}-{fp[:8] if 'fp' in locals() else uuid.uuid4().hex[:8]}{ext}")
+                    # fp 始终在上方赋值（hashlib.sha1），无需 locals() 检查
+                    dst = _safe_join(out_dir, f"{base}-{fp[:8]}{ext}")
                 try:
                     with open(dst, "wb") as f:
                         f.write(raw)
@@ -1199,7 +1203,10 @@ class SkillAgentTool(Tool):
         finally:
             if not resume_saved and not is_resuming and resume_pending:
                 _storage_set_json(storage, resume_key, None)
+            # 统一扫描一次 session_dir，复用结果避免重复 I/O
             temp_files_text = ""
+            has_any_files = False
+            temp_file_entries: list[dict] = []
             try:
                 temp_entries = _list_dir(session_dir, max_depth=10)
                 rel_paths = [
@@ -1210,38 +1217,13 @@ class SkillAgentTool(Tool):
                 if rel_paths:
                     temp_files_text = "\n\n[temp_files]\n" + "\n".join(rel_paths)
                 _dbg(f"temp_files_count={len(rel_paths)}")
-            except Exception:
-                temp_files_text = ""
-
-            files_to_send: list[tuple[str, str, str, str]] = []
-            try:
-                for rel, meta_override in (final_file_meta or {}).items():
-                    if not rel or not isinstance(rel, str):
-                        continue
-                    rel_norm = rel.replace("\\", "/").lstrip("/")
-                    if not rel_norm:
-                        continue
-                    try:
-                        path = _safe_join(session_dir, rel_norm)
-                    except Exception:
-                        continue
-                    if not os.path.isfile(path):
-                        continue
-                    filename = os.path.basename(rel_norm)
-                    out_name = (meta_override.get("filename") if isinstance(meta_override, dict) else None) or filename
-                    mime_type = (meta_override.get("mime_type") if isinstance(meta_override, dict) else None) or _guess_mime_type(out_name or filename)
-                    files_to_send.append((rel_norm, path, mime_type, out_name))
-            except Exception:
-                files_to_send = []
-
-            has_any_files = False
-            temp_file_entries: list[dict] = []
-            try:
-                temp_entries = _list_dir(session_dir, max_depth=10)
+                # 复用同一次扫描结果
                 temp_file_entries = [e for e in temp_entries if isinstance(e, dict) and e.get("type") == "file"]
                 has_any_files = len(temp_file_entries) > 0
             except Exception:
-                has_any_files = False
+                pass
+
+            files_to_send: list[tuple[str, str, str, str]] = []
 
             # 自动兜底：如果有中间文件但未调用 export_temp_file，自动将所有临时文件作为交付文件
             if not files_to_send and has_any_files:

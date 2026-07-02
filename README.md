@@ -1,132 +1,147 @@
 ## Skill Agent
 
-**作者：** [liux297](https://github.com/liux297) · 297218348@qq.com
-**版本：** 0.2.8
-**类型：** 工具插件
-**许可证：** Apache-2.0
-**项目地址：** https://github.com/liux297/skill_agent
+**Author:** [liux297](https://github.com/liux297) · 297218348@qq.com
+**Version:** 0.2.8 | **Type:** Tool Plugin | **License:** Apache-2.0
+**Repository:** https://github.com/liux297/skill_agent
 
-### v0.2.8 新增功能
+---
 
-Skill Agent 是基于 Skill 渐进式披露模式构建的通用型 Agent 插件，参考/借鉴 OpenClaw 与 Hermes 的 Agent 架构设计。v0.2.8 版本在原有基础上实现了以下增强：
+### Introduction
 
-- **双协议智能切换**：自动检测模型 FC 能力，兼容 Function Calling 和 JSON 协议两种模式
-- **渐进式披露优化**：先用技能索引判断，再读取 SKILL.md，再按需读文件/执行命令，避免冗余操作
-- **上下文智能压缩**：基于 token 估算的上下文管理与自动恢复机制
-- **命令白名单沙箱**：安全的脚本执行控制，防止危险命令执行
-- **文件交付机制**：Agent 结束时会把 temp 会话目录中的文件作为文件输出返回
-- **流式对话输出**：支持实时自然语言流式输出，隐藏内部协议消息
-- **自定义变量注入**：支持 `custom_variables` JSON 键值对注入，含 `${var}` 模板替换和环境变量传递
-- **详细模式开关**：调试级详细输出与面向用户的简洁输出自由切换
-- **自定义系统提示词**：可覆盖或扩展默认 Agent 行为指令
+Skill Agent is a general-purpose tool plugin built on the **Skill Progressive Disclosure** pattern, inspired by the OpenClaw and Hermes agent architectures. It treats the local `skills/` directory as a modular toolbox: the model reads a skill index first, then loads the relevant `SKILL.md` manual on demand, and finally reads reference files or runs scripts only when necessary — delivering text or files as the final output.
 
-### 简介
+---
 
-Skill Agent 是一个基于 "Skill 渐进式披露（Progressive Disclosure）" 设计的通用型工具插件，参考/借鉴 OpenClaw 与 Hermes 的 Agent 架构设计。它把本地 `skills/` 目录当作"工具箱"，让大模型在需要时逐步读取技能说明、再按需读取文件/执行脚本，最终生成文本或文件交付。
+### What's New in v0.2.8
 
-### 适用场景
+- **Dual-Protocol Smart Switching** — Auto-detects model FC capability, compatible with both Function Calling and JSON protocols
+- **Optimized Progressive Disclosure** — Skill index → read SKILL.md → read files/run commands on demand, avoiding redundant operations
+- **Token-Aware Context Compaction** — Token-estimation-based context management with automatic recovery
+- **Command Whitelist Sandbox** — Secure script execution control, preventing dangerous commands
+- **File Delivery** — Files in the temp session directory are returned as outputs when the agent finishes
+- **Streaming Output** — Real-time natural-language streaming with internal protocol messages hidden
+- **Custom Variables** — JSON key-value injection with `${var}` template replacement and environment variable pass-through
+- **Verbose Mode Toggle** — Switch between debug-level detail and clean user-facing output
+- **Custom System Prompt** — Override or extend default agent behavior instructions
 
-- 你希望接入 Skill，用"说明书（SKILL.md）+ 文件结构 + 脚本"来约束/增强大模型执行能力
-- 你希望输出带有进度提示，并把生成的文件作为工具输出返回
-- 你希望把技能封装成可复用的目录（Reference、Scripts 等），而不是把所有逻辑写死在提示词里
-- 你希望通过 `custom_variables` 向技能注入运行时上下文（用户身份、团队 ID 等）
+---
 
-### 功能特性
+### Use Cases
 
-- 渐进式披露：先用技能索引判断，再读取 SKILL.md，再按需读文件/执行命令
-- 文件交付：Agent 结束时会把本次 temp 会话目录中的文件作为文件输出返回
-- 自由执行：Agent 可以执行任意白名单内的命令，包括读取文件、写入文件、执行脚本等
-- 可控记忆：Agent 可设定记忆长度，可执行轮次深度等
-- 自定义变量：通过 `${var}` 模板和环境变量向技能注入运行时上下文
-- 详细模式开关：调试时展示完整细节，面向用户时隐藏技术细节
+- Integrate Skills and constrain/strengthen the model using "manual (SKILL.md) + file structure + scripts"
+- Show progress messages and return generated files as tool outputs
+- Package capabilities as reusable skill folders (References, Scripts, etc.) instead of hard-coding everything in prompts
+- Inject runtime context (user identity, team ID, etc.) into skills via `custom_variables`
 
-### 工具参数
+---
 
-本插件共有两个工具：
+### Features
 
-**"技能管理"**：用于管理技能目录，可查看技能、新增技能、删除技能、下载技能。
-![alt text](_assets/image-0.png)
+- **Progressive Disclosure:** skill index → read `SKILL.md` → read files / run commands as needed
+- **File Delivery:** all files in the temp session directory are returned when the agent finishes
+- **Free Execution:** the agent can run any whitelisted command (read/write files, execute scripts, etc.)
+- **Controllable Memory:** configurable memory turns and max step depth
+- **Custom Variables:** inject runtime context via `${var}` templates and environment variables
+- **Verbose Mode Toggle:** switch between debug-level detail and clean user-facing output
 
-**"agent_skill"**：通用智能体，可用于执行已存入的技能。
-![alt text](_assets/image-1.png)
+---
 
-"agent_skill" 工具支持的参数：
+### Tool Parameters
 
-| 参数 | 类型 | 必填 | 默认值 | 说明 |
+This plugin provides two tools:
+
+- **Skill Manager** — Manages the local skills directory (list / add / delete / download skills).
+  ![Skill Manager](_assets/image-0.png)
+- **agent_skill** — A general agent that executes stored skills.
+  ![agent_skill](_assets/image-1.png)
+
+The **agent_skill** tool accepts the following parameters:
+
+| Parameter | Type | Required | Default | Description |
 |------|------|------|--------|------|
-| `query` | string | 是 | - | 你想问的问题或任务 |
-| `model` | model-selector | 是 | - | 运行本工具的大模型 |
-| `files` | files | 否 | - | 供 Agent 处理的上传文件 |
-| `max_steps` | number | 是 | 15 | 单次调用内最大执行轮数 |
-| `memory_turns` | number | 是 | 12 | 单次调用内保留的上下文轮数 |
-| `history_turns` | number | 是 | 3 | 跨回合注入的历史对话轮数 |
-| `system_prompt` | string | 否 | - | 自定义系统提示词 |
-| `custom_variables` | string | 否 | - | JSON 键值对，如 `{"current_user":"Alice"}` |
-| `verbose` | boolean | 是 | true | 是否显示详细执行过程 |
+| `query` | string | Yes | - | Your question or task for the agent |
+| `model` | model-selector | Yes | - | LLM to run this tool |
+| `files` | files | No | - | File(s) for the agent to process |
+| `max_steps` | number | Yes | 15 | Max reasoning/tool steps per call |
+| `memory_turns` | number | Yes | 12 | Recent turns to keep during the run |
+| `history_turns` | number | Yes | 3 | Previous runs to inject as transcript |
+| `system_prompt` | string | No | - | Custom system prompt to override defaults |
+| `custom_variables` | string | No | - | JSON key-value pairs, e.g. `{"current_user":"Alice"}` |
+| `verbose` | boolean | Yes | true | Show detailed execution progress |
 
-`custom_variables` 参数接受 JSON 格式的键值对，会被注入到 Agent 上下文中。技能可通过 `get_session_context()` 获取这些变量，方便在技能脚本中使用当前用户、团队等信息。
+The `custom_variables` parameter accepts a JSON object of key-value pairs that will be injected into the agent context. Skills can access these variables via `get_session_context()`, making it easy to pass user identity, team info, or other runtime context to skills.
 
-### 使用方式（在 Dify 中）
+---
 
-**第一步**：在市场中安装此插件（或上传 `.difypkg` 文件）
+### How to Use (in Dify)
 
-**第二步**：自托管用户在 Dify 的 `.env` 中将 `Files_url` 设置为你的 Dify 地址，否则 Dify 获取不到上传的文件
+**Step 1:** Install this plugin from the Marketplace (or upload the `.difypkg` file)
 
-**第三步**：编排工作流，如下图
-![alt text](_assets/image-2.png)
+**Step 2:** For self-hosted deployments, set `Files_url` in Dify's `.env` to your Dify address, otherwise Dify cannot fetch uploaded files
 
-**第四步**：管理技能（以 zip 压缩包形式上传技能包）
-![alt text](_assets/image-3.png)
+**Step 3:** Build your workflow as shown below
+![Workflow](_assets/image-2.png)
 
-**第五步**：与 Skill_Agent 交互
-![alt text](_assets/image-4.png)
-![alt text](_assets/image-5.png)
+**Step 4:** Manage skills (upload skill packages as zip files)
+![Manage Skills](_assets/image-3.png)
 
-### Skill 标准规范
+**Step 5:** Chat with Skill Agent
+![Chat 1](_assets/image-4.png)
+![Chat 2](_assets/image-5.png)
 
-- 每个 skill 必须包含 `SKILL.md`（支持 YAML Frontmatter：`name`、`description`）
-- `SKILL.md` 里可以定义触发条件、流程、需要读取的参考文件、需要执行的脚本命令、交付物规范等
-- 技能文档中可以使用 `${variable_name}` 占位符，其值来自 `custom_variables` 参数
+---
 
-### 更新历史
+### Skill Standard
 
-**v0.2.8（当前版本）：**
-1. 双协议智能切换：自动检测模型 FC 能力，兼容 Function Calling 和 JSON 协议两种模式
-2. 渐进式披露优化：避免冗余的文件列表操作，提高执行效率
-3. 上下文智能压缩：基于 token 估算的上下文管理与自动恢复机制
-4. 命令白名单沙箱：安全的脚本执行控制
-5. 文件交付机制：Agent 结束时返回 temp 会话目录中的文件
-6. 流式对话输出：支持实时自然语言流式输出
-7. `custom_variables` 支持 JSON 键值对注入，含模板替换和环境变量传递
-8. `verbose` 模式开关，可在调试级详细输出和面向用户的简洁输出间切换
-9. `system_prompt` 参数，可覆盖或扩展默认 Agent 行为指令
+- Every skill must include `SKILL.md` (YAML frontmatter supported: `name`, `description`)
+- `SKILL.md` can define trigger conditions, workflow, required reference reads, commands to run, and deliverable specs
+- Skills can use `${variable_name}` placeholders that are replaced by values from `custom_variables`
 
-**历史版本：** 包含 JSON 智能压缩、模型能力自适应检测、统一工具执行管线、Token 感知上下文压缩、流式输出、跨轮次对话、文件记忆、文件上传与解析、依赖安装、技能管理，以及渐进式披露核心架构。
+---
 
-### 常见问题
+### Changelog
 
-**1. 安装不上**
-有网络的情况下安装不上，可切换一下 Dify 的 pip 源以更好地下载依赖。内网环境下需要通过离线包安装（联系作者）。
+**v0.2.8 (current):**
+1. Dual-protocol smart switching: auto-detects model FC capability (Function Calling / JSON)
+2. Optimized progressive disclosure: skip redundant file listing when entry point is specified
+3. Token-aware context compaction with automatic overflow recovery
+4. Command whitelist sandbox for secure script execution
+5. File delivery: return temp session files when agent finishes
+6. Real-time streaming output with internal protocol filtering
+7. `custom_variables` JSON key-value injection with template replacement and env var pass-through
+8. `verbose` mode toggle for debug or user-facing output
+9. `system_prompt` parameter to override default agent instructions
 
-**2. 文件传输问题**
-上传/下载文件失败（URL 不对、下载超时等），请检查 Dify 的 `.env` 文件是否设置了正确的 `Files_url`，且与 Dify 地址一致。
+**Earlier versions:** Smart JSON compression, adaptive model capability detection, unified tool execution pipeline, streaming output, multi-turn conversations, file memory, file uploads, auto dependency installation, skill management, and the core progressive disclosure architecture.
 
-**3. skill_agent 没有输出**
-请确保你的大模型和供应商插件支持 function call 功能。
+---
 
-**4. skill 调用相关**
-skill 越完整，Agent 调用越顺畅。保障你的 skill 相关资料、脚本没有缺失。如果是 Node.js 脚本 skill，请先在 Dify 的 `plugin_daemon` 容器中安装 Node.js 环境。
+### FAQ
 
-**5. 如何使用 custom_variables**
-在 `custom_variables` 字段传入类似 `{"current_user":"Alice","team_id":"T123"}` 的 JSON 字符串。在你的 SKILL.md 或脚本中，可通过 `${current_user}` 引用变量，或通过环境变量（自动转为大写：`$CURRENT_USER`）访问。
+**1. Installation issues**
+If installation fails with network access available, try switching Dify's pip mirror for better dependency downloads. In intranet environments, install via an offline package (contact the author).
 
-### 作者与联系
+**2. File transfer issues**
+If uploading/downloading files fails (wrong URL, download timeout, etc.), check whether Dify's `.env` has `Files_url` set correctly and matches your Dify address.
 
-- **作者：** [liux297](https://github.com/liux297)
-- **邮箱：** 297218348@qq.com
-- **项目地址：** https://github.com/liux297/skill_agent
+**3. No output from skill_agent**
+Make sure your model and provider plugin support function calling.
 
-### 许可证
+**4. Skill invocation issues**
+The more complete your skill is, the more smoothly the agent can invoke it. Ensure your skill materials and scripts are not missing. For Node.js script skills, install Node.js in the Dify `plugin_daemon` container first.
+
+**5. Using custom_variables**
+Pass a JSON string like `{"current_user":"Alice","team_id":"T123"}`. Reference variables as `${current_user}` in SKILL.md or via environment variables (auto uppercased: `$CURRENT_USER`).
+
+---
+
+### Author & Contact
+
+- **Author:** [liux297](https://github.com/liux297)
+- **Email:** 297218348@qq.com
+- **Repository:** https://github.com/liux297/skill_agent
+
+### License
 
 Copyright (c) 2026 liux297
 

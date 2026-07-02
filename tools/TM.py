@@ -15,6 +15,9 @@ from zipfile import ZipFile
 from dify_plugin import Tool
 from dify_plugin.entities.tool import ToolInvokeMessage
 
+# 复用 utils/tools.py 中的公共工具函数，消除重复实现
+from utils.tools import _extract_url_and_name, _infer_ext_from_url, _safe_filename
+
 
 def get_file_content(url: str, timeout: int = 30) -> bytes:
     try:
@@ -37,36 +40,6 @@ def list_skills_sorted() -> list[Path]:
     folders = [p for p in skills_dir.iterdir() if p.is_dir()]
     folders.sort(key=lambda p: p.stat().st_ctime)
     return folders
-
-
-def extract_url_and_name(file_item: Any) -> tuple[str | None, str | None]:
-    url = None
-    name = None
-    if hasattr(file_item, "url"):
-        url = getattr(file_item, "url", None)
-    if hasattr(file_item, "filename"):
-        name = getattr(file_item, "filename", None)
-    if hasattr(file_item, "name") and not name:
-        name = getattr(file_item, "name", None)
-    if isinstance(file_item, dict):
-        url = file_item.get("url", url)
-        name = file_item.get("filename", name) or file_item.get("name", name)
-    return url, name
-
-
-def infer_ext_from_url(url: str) -> str:
-    path = urlparse(url).path
-    ext = Path(path).suffix
-    return ext if ext else ".zip"
-
-
-def safe_filename(preferred_name: str | None, fallback_ext: str = ".zip") -> str:
-    if preferred_name:
-        base = Path(preferred_name).name
-        base = re.sub(r"[<>:\"/\\\\|?*]+", "_", base).strip()
-        if base:
-            return base
-    return f"{uuid.uuid4().hex}{fallback_ext}"
 
 
 def _is_within_dir(base: Path, target: Path) -> bool:
@@ -146,7 +119,7 @@ class TMTool(Tool):
             installed: list[str] = []
 
             for file_item in file_items:
-                url, preferred_name = extract_url_and_name(file_item)
+                url, preferred_name = _extract_url_and_name(file_item)
                 if not url:
                     yield self.create_text_message("❌无法获取文件URL，请检查入参（files[i].url）。\n")
                     return
@@ -168,8 +141,8 @@ class TMTool(Tool):
                 if filename_attr:
                     filename = Path(filename_attr).name
                 else:
-                    ext = infer_ext_from_url(url)
-                    filename = safe_filename(preferred_name, fallback_ext=ext if ext else ".zip")
+                    ext = _infer_ext_from_url(url)
+                    filename = _safe_filename(preferred_name, fallback_ext=ext if ext else ".zip")
 
                 with tempfile.TemporaryDirectory(prefix="skill-upload-") as td:
                     tmp_dir = Path(td)

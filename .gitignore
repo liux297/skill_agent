@@ -177,3 +177,6 @@ cython_debug/
 temp/
 skills/
 .trae/
+*.difypkg
+!skill_agent-0.2.8.difypkg
+dify-plugin-*
