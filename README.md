@@ -1,7 +1,7 @@
 ## Skill Agent
 
 **Author:** [liux297](https://github.com/liux297) · 297218348@qq.com
-**Version:** 0.2.8 | **Type:** Tool Plugin | **License:** Apache-2.0
+**Version:** 0.2.9 | **Type:** Tool Plugin | **License:** Apache-2.0
 **Repository:** https://github.com/liux297/skill_agent
 
 ---
@@ -12,7 +12,7 @@ Skill Agent is a general-purpose tool plugin built on the **Skill Progressive Di
 
 ---
 
-### What's New in v0.2.8
+### What's New in v0.2.9
 
 - **Dual-Protocol Smart Switching** — Auto-detects model FC capability, compatible with both Function Calling and JSON protocols
 - **Optimized Progressive Disclosure** — Skill index → read SKILL.md → read files/run commands on demand, avoiding redundant operations
@@ -101,7 +101,7 @@ The `custom_variables` parameter accepts a JSON object of key-value pairs that w
 
 ### Changelog
 
-**v0.2.8 (current):**
+**v0.2.9 (current):**
 1. Dual-protocol smart switching: auto-detects model FC capability (Function Calling / JSON)
 2. Optimized progressive disclosure: skip redundant file listing when entry point is specified
 3. Token-aware context compaction with automatic overflow recovery

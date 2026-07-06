@@ -173,6 +173,11 @@ cython_debug/
 .gitignore
 .github/
 
+# Development files
+.gh-config/
+test_fixes.py
+.trae/
+
 # Mac
 .DS_Store
 

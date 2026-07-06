@@ -1,4 +1,4 @@
-version: 0.2.8
+version: 0.2.9
 type: plugin
 author: liux297
 name: skill_agent
@@ -60,7 +60,7 @@ plugins:
   tools:
     - provider/skill_agent.yaml
 meta:
-  version: 0.2.8
+  version: 0.2.9
   arch:
     - amd64
     - arm64
@@ -68,7 +68,7 @@ meta:
     language: python
     version: "3.12"
     entrypoint: main
-  minimum_dify_version: null
-created_at: 2026-01-22T14:14:33.3888065+08:00
+  minimum_dify_version: "0.15.0"
+created_at: 2026-07-02T10:00:00.000000+08:00
 privacy: PRIVACY.md
 verified: false

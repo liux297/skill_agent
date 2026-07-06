@@ -1,14 +1,14 @@
 ## Skill Agent
 
 **作者：** [liux297](https://github.com/liux297) · 297218348@qq.com
-**版本：** 0.2.8
+**版本：** 0.2.9
 **类型：** 工具插件
 **许可证：** Apache-2.0
 **项目地址：** https://github.com/liux297/skill_agent
 
-### v0.2.8 新增功能
+### v0.2.9 新增功能
 
-Skill Agent 是基于 Skill 渐进式披露模式构建的通用型 Agent 插件，参考/借鉴 OpenClaw 与 Hermes 的 Agent 架构设计。v0.2.8 版本在原有基础上实现了以下增强：
+Skill Agent 是基于 Skill 渐进式披露模式构建的通用型 Agent 插件，参考/借鉴 OpenClaw 与 Hermes 的 Agent 架构设计。v0.2.9 版本在原有基础上实现了以下增强：
 
 - **双协议智能切换**：自动检测模型 FC 能力，兼容 Function Calling 和 JSON 协议两种模式
 - **渐进式披露优化**：先用技能索引判断，再读取 SKILL.md，再按需读文件/执行命令，避免冗余操作
@@ -90,7 +90,7 @@ Skill Agent 是一个基于 "Skill 渐进式披露（Progressive Disclosure）" 
 
 ### 更新历史
 
-**v0.2.8（当前版本）：**
+**v0.2.9（当前版本）：**
 1. 双协议智能切换：自动检测模型 FC 能力，兼容 Function Calling 和 JSON 协议两种模式
 2. 渐进式披露优化：避免冗余的文件列表操作，提高执行效率
 3. 上下文智能压缩：基于 token 估算的上下文管理与自动恢复机制

@@ -178,5 +178,5 @@ temp/
 skills/
 .trae/
 *.difypkg
-!skill_agent-0.2.8.difypkg
+!skill_agent-0.2.9.difypkg
 dify-plugin-*
