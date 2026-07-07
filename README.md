@@ -1,141 +1,89 @@
 ## Skill Agent
 
 **Author:** [liux297](https://github.com/liux297) · 297218348@qq.com
-**Version:** 0.2.9 | **Type:** Tool Plugin | **License:** Apache-2.0
+**Version:** 0.2.11
+**Type:** Tool Plugin
+**License:** Apache-2.0
 **Repository:** https://github.com/liux297/skill_agent
 
----
+### Overview
 
-### Introduction
+Skill Agent is a universal Agent plugin built on the "Skill Progressive Disclosure" pattern, inspired by OpenClaw and Hermes agent architecture designs. It treats the local `skills/` directory as a "toolbox", allowing the LLM to progressively read skill instructions, files, and execute scripts on demand, ultimately generating text or file deliverables.
 
-Skill Agent is a general-purpose tool plugin built on the **Skill Progressive Disclosure** pattern, inspired by the OpenClaw and Hermes agent architectures. It treats the local `skills/` directory as a modular toolbox: the model reads a skill index first, then loads the relevant `SKILL.md` manual on demand, and finally reads reference files or runs scripts only when necessary — delivering text or files as the final output.
+### Key Features
 
----
-
-### What's New in v0.2.9
-
-- **Dual-Protocol Smart Switching** — Auto-detects model FC capability, compatible with both Function Calling and JSON protocols
-- **Optimized Progressive Disclosure** — Skill index → read SKILL.md → read files/run commands on demand, avoiding redundant operations
-- **Token-Aware Context Compaction** — Token-estimation-based context management with automatic recovery
-- **Command Whitelist Sandbox** — Secure script execution control, preventing dangerous commands
-- **File Delivery** — Files in the temp session directory are returned as outputs when the agent finishes
-- **Streaming Output** — Real-time natural-language streaming with internal protocol messages hidden
-- **Custom Variables** — JSON key-value injection with `${var}` template replacement and environment variable pass-through
-- **Verbose Mode Toggle** — Switch between debug-level detail and clean user-facing output
-- **Custom System Prompt** — Override or extend default agent behavior instructions
-
----
+- **Dual-protocol smart switching**: Auto-detects model Function Calling capability, compatible with both FC and JSON protocols
+- **Progressive disclosure**: Skill index lookup first, then read SKILL.md, then read files/execute commands as needed
+- **Context smart compression**: Token-based context management with auto-recovery mechanism
+- **Command whitelist sandbox**: Safe script execution control to prevent dangerous commands
+- **File delivery**: Agent returns files from the temp session directory as tool output
+- **Streaming output**: Real-time natural language streaming output, hiding internal protocol messages
+- **Custom variable injection**: Supports `custom_variables` JSON key-value pairs with `${var}` template replacement and environment variable passing
+- **Verbose mode toggle**: Debug-level detailed output vs user-facing concise output
+- **Custom system prompt**: Override or extend the default Agent behavior instructions
+- **Step-by-step progress**: Each tool execution step displays icon, step number, operation description, elapsed time, and result summary
 
 ### Use Cases
 
-- Integrate Skills and constrain/strengthen the model using "manual (SKILL.md) + file structure + scripts"
-- Show progress messages and return generated files as tool outputs
-- Package capabilities as reusable skill folders (References, Scripts, etc.) instead of hard-coding everything in prompts
-- Inject runtime context (user identity, team ID, etc.) into skills via `custom_variables`
+- You want to use Skills with "SKILL.md + file structure + scripts" to enhance LLM execution capabilities
+- You want output with progress indicators and generated files returned as tool output
+- You want to package skills as reusable directories (Reference, Scripts, etc.) instead of hardcoding all logic in prompts
+- You want to inject runtime context (user identity, team ID, etc.) into skills via `custom_variables`
 
----
-
-### Features
-
-- **Progressive Disclosure:** skill index → read `SKILL.md` → read files / run commands as needed
-- **File Delivery:** all files in the temp session directory are returned when the agent finishes
-- **Free Execution:** the agent can run any whitelisted command (read/write files, execute scripts, etc.)
-- **Controllable Memory:** configurable memory turns and max step depth
-- **Custom Variables:** inject runtime context via `${var}` templates and environment variables
-- **Verbose Mode Toggle:** switch between debug-level detail and clean user-facing output
-
----
-
-### Tool Parameters
+### Tools
 
 This plugin provides two tools:
 
-- **Skill Manager** — Manages the local skills directory (list / add / delete / download skills).
-  ![Skill Manager](_assets/image-0.png)
-- **agent_skill** — A general agent that executes stored skills.
-  ![agent_skill](_assets/image-1.png)
+**Skill Manager**: Manage skill directories — view, add, delete, and download skills.
 
-The **agent_skill** tool accepts the following parameters:
+**Skill Agent**: Universal agent for executing installed skills.
+
+### Skill Agent Parameters
 
 | Parameter | Type | Required | Default | Description |
-|------|------|------|--------|------|
-| `query` | string | Yes | - | Your question or task for the agent |
+|-----------|------|----------|---------|-------------|
+| `query` | string | Yes | - | Your question or task |
 | `model` | model-selector | Yes | - | LLM to run this tool |
-| `files` | files | No | - | File(s) for the agent to process |
-| `max_steps` | number | Yes | 15 | Max reasoning/tool steps per call |
-| `memory_turns` | number | Yes | 12 | Recent turns to keep during the run |
-| `history_turns` | number | Yes | 3 | Previous runs to inject as transcript |
-| `system_prompt` | string | No | - | Custom system prompt to override defaults |
+| `files` | files | No | - | Uploaded files for the Agent to process |
+| `max_steps` | number | Yes | 15 | Maximum execution rounds per call |
+| `memory_turns` | number | Yes | 12 | Context turns to retain per call |
+| `history_turns` | number | Yes | 3 | Cross-turn history injection rounds |
+| `system_prompt` | string | No | - | Custom system prompt |
 | `custom_variables` | string | No | - | JSON key-value pairs, e.g. `{"current_user":"Alice"}` |
 | `verbose` | boolean | Yes | true | Show detailed execution progress |
 
-The `custom_variables` parameter accepts a JSON object of key-value pairs that will be injected into the agent context. Skills can access these variables via `get_session_context()`, making it easy to pass user identity, team info, or other runtime context to skills.
+### Usage in Dify
 
----
-
-### How to Use (in Dify)
-
-**Step 1:** Install this plugin from the Marketplace (or upload the `.difypkg` file)
-
-**Step 2:** For self-hosted deployments, set `Files_url` in Dify's `.env` to your Dify address, otherwise Dify cannot fetch uploaded files
-
-**Step 3:** Build your workflow as shown below
-![Workflow](_assets/image-2.png)
-
-**Step 4:** Manage skills (upload skill packages as zip files)
-![Manage Skills](_assets/image-3.png)
-
-**Step 5:** Chat with Skill Agent
-![Chat 1](_assets/image-4.png)
-![Chat 2](_assets/image-5.png)
-
----
+1. Install this plugin from the marketplace (or upload the `.difypkg` file)
+2. For self-hosted users, set `Files_url` in Dify's `.env` to your Dify address
+3. Arrange your workflow with the Skill Agent tool node
+4. Manage skills (upload skill packages as zip files)
+5. Interact with Skill Agent
 
 ### Skill Standard
 
-- Every skill must include `SKILL.md` (YAML frontmatter supported: `name`, `description`)
-- `SKILL.md` can define trigger conditions, workflow, required reference reads, commands to run, and deliverable specs
-- Skills can use `${variable_name}` placeholders that are replaced by values from `custom_variables`
-
----
-
-### Changelog
-
-**v0.2.9 (current):**
-1. Dual-protocol smart switching: auto-detects model FC capability (Function Calling / JSON)
-2. Optimized progressive disclosure: skip redundant file listing when entry point is specified
-3. Token-aware context compaction with automatic overflow recovery
-4. Command whitelist sandbox for secure script execution
-5. File delivery: return temp session files when agent finishes
-6. Real-time streaming output with internal protocol filtering
-7. `custom_variables` JSON key-value injection with template replacement and env var pass-through
-8. `verbose` mode toggle for debug or user-facing output
-9. `system_prompt` parameter to override default agent instructions
-
-**Earlier versions:** Smart JSON compression, adaptive model capability detection, unified tool execution pipeline, streaming output, multi-turn conversations, file memory, file uploads, auto dependency installation, skill management, and the core progressive disclosure architecture.
-
----
+- Each skill must include a `SKILL.md` (supports YAML Frontmatter: `name`, `description`)
+- `SKILL.md` can define trigger conditions, workflows, reference files, script commands, deliverable specs, etc.
+- Skill documents can use `${variable_name}` placeholders, values come from the `custom_variables` parameter
 
 ### FAQ
 
-**1. Installation issues**
-If installation fails with network access available, try switching Dify's pip mirror for better dependency downloads. In intranet environments, install via an offline package (contact the author).
+**1. Installation fails**
+Try switching Dify's pip source. For intranet environments, use offline packages (contact the author).
 
 **2. File transfer issues**
-If uploading/downloading files fails (wrong URL, download timeout, etc.), check whether Dify's `.env` has `Files_url` set correctly and matches your Dify address.
+Check that Dify's `.env` has the correct `Files_url` matching your Dify address.
 
-**3. No output from skill_agent**
-Make sure your model and provider plugin support function calling.
+**3. No output from Skill Agent**
+Ensure your LLM and provider plugin support function calling.
 
-**4. Skill invocation issues**
-The more complete your skill is, the more smoothly the agent can invoke it. Ensure your skill materials and scripts are not missing. For Node.js script skills, install Node.js in the Dify `plugin_daemon` container first.
+**4. Skill-related issues**
+Ensure your skill materials and scripts are complete. For Node.js script skills, install Node.js in Dify's `plugin_daemon` container first.
 
 **5. Using custom_variables**
-Pass a JSON string like `{"current_user":"Alice","team_id":"T123"}`. Reference variables as `${current_user}` in SKILL.md or via environment variables (auto uppercased: `$CURRENT_USER`).
+Pass a JSON string like `{"current_user":"Alice","team_id":"T123"}`. In SKILL.md or scripts, reference via `${current_user}` or environment variable `$CURRENT_USER`.
 
----
-
-### Author & Contact
+### Contact
 
 - **Author:** [liux297](https://github.com/liux297)
 - **Email:** 297218348@qq.com

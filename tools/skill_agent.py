@@ -534,6 +534,8 @@ class SkillAgentTool(Tool):
         # 工具调用进度消息：verbose 开启时展示细节，关闭时只输出简洁描述
         _tool_step_counter = 0
         _non_verbose_header_emitted = False
+        import time as _time_mod
+        _step_start_times: list[float] = []  # 记录每步开始时间，用于计算耗时
 
         # 数字序号映射（最多 20 步，超出后回退为普通数字）
         _CIRCLED_NUMS = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
@@ -545,77 +547,93 @@ class SkillAgentTool(Tool):
                 return _CIRCLED_NUMS[idx]
             return f"({idx + 1})"
 
+        def _fmt_elapsed(seconds: float) -> str:
+            """格式化耗时为简洁字符串。"""
+            if seconds < 1:
+                return f"{seconds * 1000:.0f}ms"
+            return f"{seconds:.1f}s"
+
         def emit_tool_progress(tool_name: str, detail: str = "") -> Generator[ToolInvokeMessage]:
             nonlocal _tool_step_counter, _non_verbose_header_emitted
             _tool_step_counter += 1
+            _step_start_times.append(_time_mod.time())
             label = _step_label()
 
             if not verbose:
-                # ── 非详细模式：按阶段展示简洁标题，避免刷屏 ──
+                # ── 非详细模式：按阶段展示简洁但信息充足的标题 ──
                 _phase_map = {
-                    "get_skill_metadata": "查阅技能",
-                    "list_skill_files": "浏览文件",
-                    "read_skill_file": "读取文件",
-                    "run_skill_command": "执行命令",
-                    "write_temp_file": "写入文件",
-                    "read_temp_file": "读取文件",
-                    "list_temp_files": "查看文件",
-                    "run_temp_command": "执行命令",
-                    "export_temp_file": "交付文件",
-                    "install_skill": "安装技能",
-                    "list_installed_skills": "查看技能",
-                    "uninstall_skill": "卸载技能",
-                    "update_skill": "更新技能",
-                    "get_session_context": "获取上下文",
+                    "get_skill_metadata": ("🔍", "查阅技能说明书"),
+                    "list_skill_files": ("📂", "浏览技能文件"),
+                    "read_skill_file": ("📄", "读取技能文件"),
+                    "run_skill_command": ("⚡", "执行技能命令"),
+                    "write_temp_file": ("📝", "写入文件"),
+                    "read_temp_file": ("📖", "读取文件"),
+                    "list_temp_files": ("📋", "查看文件列表"),
+                    "run_temp_command": ("⚡", "执行命令"),
+                    "export_temp_file": ("📦", "标记交付文件"),
+                    "install_skill": ("🔧", "安装技能"),
+                    "list_installed_skills": ("🔧", "查看已安装技能"),
+                    "uninstall_skill": ("🗑️", "卸载技能"),
+                    "update_skill": ("🔄", "更新技能"),
+                    "get_session_context": ("ℹ️", "获取会话上下文"),
                 }
-                phase = _phase_map.get(tool_name, "处理中")
+                icon, phase = _phase_map.get(tool_name, ("⚙️", "处理中"))
+                # 非详细模式下也带上操作对象，让用户知道具体在做什么
+                detail_short = _shorten_text(detail, 40) if detail else ""
+                desc = f"{phase}" + (f"：{detail_short}" if detail_short else "")
                 if not _non_verbose_header_emitted:
                     _non_verbose_header_emitted = True
                     yield self.create_text_message("\n⏳ **正在处理中…**\n")
-                yield self.create_text_message(f"  {label} {phase}\n")
+                yield self.create_text_message(f"  {label} {icon} {desc}\n")
                 return
 
-            # ── 详细模式：展示分类图标 + 步骤编号 + 操作对象 ──
+            # ── 详细模式：展示分类图标 + 步骤编号 + 操作对象 + 参数摘要 ──
             _detail_map = {
-                "get_skill_metadata": ("🔍", f"查阅技能《{detail}》说明书"),
-                "list_skill_files": ("📂", f"浏览技能《{detail}》文件结构"),
-                "read_skill_file": ("📄", f"读取文件：{detail}"),
-                "run_skill_command": ("⚡", "执行技能命令"),
-                "write_temp_file": ("📝", f"写入文件：{detail}"),
+                "get_skill_metadata": ("🔍", f"查阅技能《{detail}》说明书，获取触发条件与执行流程"),
+                "list_skill_files": ("📂", f"浏览技能《{detail}》文件结构，了解可用资源"),
+                "read_skill_file": ("📄", f"读取技能文件：{detail}，提取关键信息"),
+                "run_skill_command": ("⚡", f"执行技能命令：{detail or '技能脚本'}"),
+                "write_temp_file": ("📝", f"写入临时文件：{detail}"),
                 "read_temp_file": ("📖", f"读取临时文件：{detail}"),
-                "list_temp_files": ("📋", "查看临时目录"),
-                "run_temp_command": ("⚡", "执行临时命令"),
-                "export_temp_file": ("📦", f"标记交付文件：{detail}"),
-                "install_skill": ("🔧", f"安装技能《{detail}》"),
-                "list_installed_skills": ("🔧", "查看已安装技能"),
+                "list_temp_files": ("📋", "查看临时目录中的文件列表"),
+                "run_temp_command": ("⚡", f"执行临时命令：{detail}"),
+                "export_temp_file": ("📦", f"标记交付文件：{detail}，准备发送给用户"),
+                "install_skill": ("🔧", f"安装技能《{detail}》到工具箱"),
+                "list_installed_skills": ("🔧", "查看当前已安装的技能列表"),
                 "uninstall_skill": ("🗑️", f"卸载技能《{detail}》"),
-                "update_skill": ("🔄", f"更新技能《{detail}》"),
-                "get_session_context": ("ℹ️", "获取会话上下文"),
+                "update_skill": ("🔄", f"更新技能《{detail}》到最新版本"),
+                "get_session_context": ("ℹ️", "获取会话上下文，恢复历史交互状态"),
             }
             icon, desc = _detail_map.get(tool_name, ("⚙️", f"执行 {tool_name}"))
             yield self.create_text_message(f"{icon} {label} {desc}\n")
 
         def emit_tool_result(tool_name: str, result: Any) -> Generator[ToolInvokeMessage]:
             """工具执行完后展示简短结果摘要。
-            
+
             部分工具（如 list_installed_skills）无论 verbose 是否开启都展示结果，
             确保用户能看到关键信息，避免 LLM 未生成最终文本时用户一无所获。
+            每步结果都带上耗时，让用户感知执行进度。
             """
             if not isinstance(result, dict):
                 return
+            # 计算本步耗时
+            elapsed_str = ""
+            if _step_start_times:
+                elapsed = _time_mod.time() - _step_start_times[-1]
+                elapsed_str = f"（{_fmt_elapsed(elapsed)}）"
             # 出错时展示简短错误提示（始终展示）
             err = result.get("error")
             if err:
-                yield self.create_text_message(f"  ⚠️ {err}\n")
+                yield self.create_text_message(f"  ⚠️ {err} {elapsed_str}\n")
                 return
             # ── 始终展示结果的工具（不受 verbose 限制） ──
             if tool_name == "list_installed_skills":
                 count = result.get("skills_count", 0)
                 skills_list = result.get("skills") or []
                 if count == 0:
-                    yield self.create_text_message("  📭 当前未安装任何技能\n")
+                    yield self.create_text_message(f"  📭 当前未安装任何技能 {elapsed_str}\n")
                 else:
-                    yield self.create_text_message(f"  ✔️ 已安装 {count} 个技能：\n")
+                    yield self.create_text_message(f"  ✔️ 已安装 {count} 个技能 {elapsed_str}：\n")
                     for s in skills_list[:30]:
                         if isinstance(s, dict):
                             name = s.get("name") or s.get("folder") or ""
@@ -632,43 +650,52 @@ class SkillAgentTool(Tool):
             # ── 以下仅在 verbose 模式下展示 ──
             if not verbose:
                 return
-            # 按工具类型展示关键结果
+            # 按工具类型展示关键结果（带耗时和更详细的摘要）
             if tool_name == "get_skill_metadata":
                 skill = result.get("skill", "")
-                yield self.create_text_message(f"  ✔️ 已获取《{skill}》说明书\n")
+                triggers = result.get("triggers", "")
+                trigger_hint = f"，触发条件：{triggers[:40]}" if triggers else ""
+                yield self.create_text_message(f"  ✔️ 已获取《{skill}》说明书{elapsed_str}{trigger_hint}\n")
             elif tool_name == "list_skill_files":
                 entries = result.get("entries") or []
-                yield self.create_text_message(f"  ✔️ 共 {len(entries)} 个文件/目录\n")
+                file_count = sum(1 for e in entries if isinstance(e, dict) and e.get("type") == "file")
+                dir_count = len(entries) - file_count
+                yield self.create_text_message(f"  ✔️ 共 {len(entries)} 项（{file_count} 文件 / {dir_count} 目录）{elapsed_str}\n")
             elif tool_name in ("read_skill_file", "read_temp_file"):
                 content = result.get("content", "")
                 lines = content.count("\n") + 1 if content else 0
-                yield self.create_text_message(f"  ✔️ 已读取 {lines} 行\n")
+                chars = len(content) if content else 0
+                yield self.create_text_message(f"  ✔️ 已读取 {lines} 行 / {chars} 字符 {elapsed_str}\n")
             elif tool_name in ("run_skill_command", "run_temp_command"):
                 rc = result.get("returncode")
                 stdout = result.get("stdout", "")
                 if rc == 0:
                     out_len = len(stdout)
-                    yield self.create_text_message(f"  ✔️ 执行成功（输出 {out_len} 字符）\n")
+                    out_preview = _shorten_text(stdout.strip(), 60)
+                    preview_hint = f"，预览：{out_preview}" if out_preview else ""
+                    yield self.create_text_message(f"  ✔️ 执行成功（输出 {out_len} 字符）{elapsed_str}{preview_hint}\n")
                 else:
-                    yield self.create_text_message(f"  ❌ 执行失败（返回码 {rc}）\n")
+                    stderr = result.get("stderr", "")
+                    err_preview = _shorten_text(stderr.strip(), 60)
+                    yield self.create_text_message(f"  ❌ 执行失败（返回码 {rc}）{elapsed_str}，错误：{err_preview}\n")
             elif tool_name == "write_temp_file":
                 nbytes = result.get("bytes", 0)
-                yield self.create_text_message(f"  ✔️ 已写入 {nbytes} 字节\n")
+                yield self.create_text_message(f"  ✔️ 已写入 {nbytes} 字节 {elapsed_str}\n")
             elif tool_name == "list_temp_files":
                 entries = result.get("entries") or []
-                yield self.create_text_message(f"  ✔️ 共 {len(entries)} 个文件/目录\n")
+                yield self.create_text_message(f"  ✔️ 共 {len(entries)} 个文件/目录 {elapsed_str}\n")
             elif tool_name == "export_temp_file":
                 name = result.get("requested_name", "")
-                yield self.create_text_message(f"  ✔️ 已标记交付：{name}\n")
+                yield self.create_text_message(f"  ✔️ 已标记交付：{name} {elapsed_str}\n")
             elif tool_name == "install_skill":
                 skill = result.get("skill", "")
-                yield self.create_text_message(f"  ✔️ 技能《{skill}》安装成功\n")
+                yield self.create_text_message(f"  ✔️ 技能《{skill}》安装成功 {elapsed_str}\n")
             elif tool_name == "uninstall_skill":
                 skill = result.get("skill", "")
-                yield self.create_text_message(f"  ✔️ 技能《{skill}》已卸载\n")
+                yield self.create_text_message(f"  ✔️ 技能《{skill}》已卸载 {elapsed_str}\n")
             elif tool_name == "update_skill":
                 skill = result.get("skill", "")
-                yield self.create_text_message(f"  ✔️ 技能《{skill}》已更新\n")
+                yield self.create_text_message(f"  ✔️ 技能《{skill}》已更新 {elapsed_str}\n")
 
         def persist_llm_assets(parts: Any) -> list[str]:
             if not parts or not isinstance(parts, list):
@@ -906,6 +933,11 @@ class SkillAgentTool(Tool):
             for step_idx in range(max_steps):
                 compact()
                 _dbg(f"step={step_idx+1}/{max_steps} messages={len(messages)}")
+                # 每轮思考前输出简洁的进度提示，让用户感知 Agent 正在工作
+                if step_idx == 0:
+                    yield self.create_text_message("\n🧠 正在思考您的需求...\n")
+                else:
+                    yield self.create_text_message(f"\n🧠 第 {step_idx + 1} 轮思考：根据上一步结果继续分析...\n")
                 try:
                     res_text, tool_calls, nontext, chunks, streamed_any = yield from invoke_llm_live(
                         prompt_messages=messages,

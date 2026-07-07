@@ -250,6 +250,9 @@ class _AgentRuntime:
                 encoding="utf-8",
                 errors="ignore",
                 env=env,
+                # 隔离子进程 stdin，防止子进程通过继承的 stdin 偷读
+                # plugin_daemon 与插件之间的 stdio 协议管道导致后续调用全部卡死
+                stdin=subprocess.DEVNULL,
                 timeout=300,
             )
             stdout = result.stdout.strip()

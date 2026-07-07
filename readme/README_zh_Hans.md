@@ -1,7 +1,7 @@
 ## Skill Agent
 
 **作者：** [liux297](https://github.com/liux297) · 297218348@qq.com
-**版本：** 0.2.9
+**版本：** 0.2.11
 **类型：** 工具插件
 **许可证：** Apache-2.0
 **项目地址：** https://github.com/liux297/skill_agent
