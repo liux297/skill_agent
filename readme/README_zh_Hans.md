@@ -1,7 +1,7 @@
 ## Skill Agent
 
 **作者：** [liux297](https://github.com/liux297) · 297218348@qq.com
-**版本：** 0.2.11
+**版本：** 0.2.12
 **类型：** 工具插件
 **许可证：** Apache-2.0
 **项目地址：** https://github.com/liux297/skill_agent
@@ -62,7 +62,7 @@ Skill Agent 是一个基于 "Skill 渐进式披露（Progressive Disclosure）" 
 | `history_turns` | number | 是 | 3 | 跨回合注入的历史对话轮数 |
 | `system_prompt` | string | 否 | - | 自定义系统提示词 |
 | `custom_variables` | string | 否 | - | JSON 键值对，如 `{"current_user":"Alice"}` |
-| `verbose` | boolean | 是 | true | 是否显示详细执行过程 |
+| `verbose` | boolean | 是 | false | 调试模式：显示命令、路径、参数与执行输出 |
 
 `custom_variables` 参数接受 JSON 格式的键值对，会被注入到 Agent 上下文中。技能可通过 `get_session_context()` 获取这些变量，方便在技能脚本中使用当前用户、团队等信息。
 

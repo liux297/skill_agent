@@ -132,18 +132,18 @@ parameters:
   - name: verbose
     type: boolean
     required: true
-    default: true
+    default: false
     label:
-      en_US: Verbose Mode
-      zh_Hans: 详细模式
+      en_US: Debug Mode
+      zh_Hans: 调试模式
       pt_BR: Modo verboso
       ja_JP: 詳細モード
     human_description:
-      en_US: "Show detailed tool execution progress (skill names, file paths, command output). Turn off for cleaner user-facing output."
-      zh_Hans: "是否显示详细的执行过程（技能名称、文件路径、命令输出等）。调试时建议开启，面向用户使用时可关闭以获得更简洁的输出。"
+      en_US: "Show executed commands, working directories, tool parameters and command stdout/stderr. Keep off for user-facing runs."
+      zh_Hans: "显示实际执行命令、工作目录、工具参数和命令输出/错误，便于开发排错；面向最终用户时请关闭。"
       pt_BR: "Mostrar progresso detalhado da execução de ferramentas."
       ja_JP: "ツール実行の詳細な進捗を表示するかどうか。"
-    llm_description: "Whether to show verbose execution details (tool names, paths, errors) to the end user."
+    llm_description: "Debug switch: show detailed commands, paths and output for troubleshooting."
     form: form
 
   - name: history_turns
@@ -183,7 +183,7 @@ parameters:
   - name: allowed_commands
     type: string
     required: false
-    default: "python,python3,pip,pip3,node,pandoc,soffice,pdftoppm,npm,npx,bun,curl,uvx,wget,git,bash,sh,uv,/bin/bash,/bin/sh"
+    default: "python,python3,node,pandoc,soffice,pdftoppm"
     label:
       en_US: Allowed Commands
       zh_Hans: 允许的命令
@@ -195,6 +195,18 @@ parameters:
       pt_BR: "Lista de comandos permitidos, separados por vírgula."
       ja_JP: "許可するコマンドリスト（カンマ区切り）。このフィールドを編集して許可コマンドを管理。"
     llm_description: "Comma-separated list of allowed commands that the agent can execute via run_skill_command/run_temp_command."
+    form: form
+
+  - name: allow_unsafe_commands
+    type: boolean
+    required: true
+    default: false
+    label:
+      en_US: Unsafe command mode
+      zh_Hans: 高风险命令模式
+    human_description:
+      en_US: "Allow shells, package managers and network clients. Enable only for trusted, self-hosted skills."
+      zh_Hans: "允许 shell、包管理器和网络客户端；仅限完全可信的自托管技能使用。"
     form: form
 extra:
   python:

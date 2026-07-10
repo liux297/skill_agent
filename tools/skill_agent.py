@@ -28,7 +28,7 @@ from utils.tools import (
     _split_message_content,
  )
 
-from utils.skill_agent_constants import HISTORY_TRANSCRIPT_MAX_CHARS
+from utils.skill_agent_constants import ALLOWED_COMMANDS, HISTORY_TRANSCRIPT_MAX_CHARS, MAX_UPLOAD_BYTES
 from utils.skill_agent_debug import _dbg, _model_brief
 from utils.skill_agent_exec import _cleanup_old_temp_sessions, _detect_skills_root
 from utils.skill_agent_runtime import _AgentRuntime
@@ -56,6 +56,17 @@ from dify_plugin.entities.model.message import (
 from dify_plugin.entities.tool import ToolInvokeMessage
 
 class SkillAgentTool(Tool):
+    def create_text_message(self, text: str) -> ToolInvokeMessage:
+        """Stream every textual update through Dify's built-in text variable.
+
+        Plain TEXT invoke messages are accumulated by the tool execution layer and
+        commonly reach the UI in one batch. Streaming VARIABLE messages are the SDK
+        mechanism that Dify forwards incrementally with the typewriter effect.
+        Keeping this compatibility override means every existing progress/error/final
+        emission becomes genuinely incremental without duplicating the final output.
+        """
+        return self.create_stream_variable_message("text", text)
+
     def _invoke(self, tool_parameters: dict[str, Any]) -> Generator[ToolInvokeMessage]:
         model = tool_parameters.get("model")
         query = tool_parameters.get("query")
@@ -64,15 +75,16 @@ class SkillAgentTool(Tool):
         history_turns = int(tool_parameters.get("history_turns") or 0)
         max_stdout_chars = int(tool_parameters.get("max_stdout_chars") or 30000)
         system_prompt = tool_parameters.get("system_prompt") or "你是一个智能助手，能够使用 Skills 工具箱中的技能完成用户的各种任务。"
-        # 详细模式开关：控制是否向用户展示工具调用/执行细节（调试时开启，面向用户时可关闭）
+        # 调试模式开关：保留 verbose 参数名以兼容既有工作流。
         _verbose_raw = tool_parameters.get("verbose")
         verbose = _verbose_raw not in (False, "false", "False", 0, "0")
 
         # 解析命令白名单：逗号分隔字符串 → 集合（yaml 已配置默认值）
         allowed_commands_raw = tool_parameters.get("allowed_commands") or ""
-        allowed_commands: set[str] = set()
+        allowed_commands: set[str] = set(ALLOWED_COMMANDS)
         if isinstance(allowed_commands_raw, str) and allowed_commands_raw.strip():
             allowed_commands = {cmd.strip().lower() for cmd in allowed_commands_raw.split(",") if cmd.strip()}
+        allow_unsafe_commands = tool_parameters.get("allow_unsafe_commands") in (True, "true", "True", 1, "1")
 
         skills_root = _detect_skills_root(tool_parameters.get("skills_root"))
         storage = self.session.storage
@@ -153,7 +165,7 @@ class SkillAgentTool(Tool):
                     yield self.create_text_message("❌未能获取上传文件 URL（files[i].url）。\n")
                     return
                 try:
-                    content = _download_file_content(str(url), timeout=45)
+                    content = _download_file_content(str(url), timeout=45, max_bytes=MAX_UPLOAD_BYTES)
                 except Exception as e:
                     yield self.create_text_message(f"❌文件下载失败：{str(e)}\n")
                     return
@@ -208,6 +220,7 @@ class SkillAgentTool(Tool):
             custom_variables=custom_variables,
             max_stdout_chars=max_stdout_chars,
             allowed_commands=allowed_commands,
+            allow_unsafe_commands=allow_unsafe_commands,
         )
 
         history_messages: list[Any] = []
@@ -276,7 +289,11 @@ class SkillAgentTool(Tool):
             + "8) 按说明书要求生成最终文件后，必须用 export_temp_file 标记最终文件\n"
             + "路径规则：uploads/ 与你用 write_temp_file 生成的中间产物都位于 session_dir 下；run_skill_command 的 cwd 在 skills_root/<skill_name> 下。\n"
             + "因此：只要命令参数需要引用 uploads/ 或 temp 中间文件，一律使用 read_temp_file 返回的绝对路径（result.path）传给命令；不要使用 ../uploads、../../temp 这类相对路径猜测。\n"
-            + "依赖安装规则：如需 npm install/npm ci/bun install，必须用 run_skill_command 在技能包内含 package.json 的目录执行（通过 cwd_relative 指到该目录）；禁止在 session_dir 执行 install，否则会写入 temp/<session>/node_modules 导致每次会话重复安装。\n"
+            + (
+                "高风险命令模式已开启：如需 npm install/npm ci/bun install，必须用 run_skill_command 在技能包内含 package.json 的目录执行（通过 cwd_relative 指到该目录）；禁止在 session_dir 执行 install，否则会写入 temp/<session>/node_modules 导致每次会话重复安装。\n"
+                if allow_unsafe_commands
+                else "安全模式已开启：禁止使用 shell、包管理器、网络客户端和自动依赖安装；如任务确实依赖它们，应说明需要由管理员在可信技能场景中开启高风险命令模式。\n"
+            )
             + "补充规则1：如果用户请求中已经明确给出具体类型/参数，则视为已确认，不要重复追问，直接进入对应分支执行。\n"
             + "补充规则2：禁止主动追问。当用户输入存在明显错别字或表述不清时，你应该自主推断其真实意图并直接执行，而不是反问用户。只有当用户意图完全无法推断、且缺少该信息确实无法继续时，才允许追问。追问时：本轮只输出问题，立刻结束，不得继续执行任何操作。\n"
             + "补充规则3：默认值只能在用户明确说‘默认/随便/你决定’时启用；用户未回复不等于选择了默认。"
@@ -286,8 +303,8 @@ class SkillAgentTool(Tool):
             + "补充规则7（禁止输出裸命令）：绝对禁止将 curl、bash、python 等原始命令作为文本输出给用户。所有命令执行必须通过 run_skill_command 或 run_temp_command 工具调用。即使 SKILL.md 中包含 curl 示例，你也必须将其转换为 run_skill_command 工具调用来执行，而不是输出 curl 命令文本。\n"
             + "补充规则8（必须完成到最终结果）：你必须持续推进直到获得最终结果并用业务语言回复用户。绝对禁止在以下情况停止：(1) 刚调用完工具但还未处理返回数据；(2) 已拿到 API 数据但还未转换为用户可理解的业务回复；(3) 任何中间步骤。只有当你已经用业务语言向用户给出了完整的最终回答后，才可以结束。\n"
             + "补充规则9：技能管理流程——当用户上传技能压缩包（zip）并要求添加/安装技能时，请按以下步骤执行：\n"
-            + "  (1) 如果上传的是 zip 文件且尚未解压，先用 run_temp_command 执行 unzip 解压到 session_dir\n"
-            + "  (2) 调用 install_skill(source_path=解压后目录或zip路径, skill_name=用户指定的名称) 安装到 skills_root\n"
+            + "  (1) 直接调用 install_skill(source_path=zip 路径或解压后的目录, skill_name=用户指定的名称)；系统会校验并安全解压 zip\n"
+            + "  (2) 调用 install_skill 成功后，技能会安装到 skills_root\n"
             + "  (3) 安装成功后即可通过 get_skill_metadata / list_skill_files 等工具使用该技能\n"
             + "  (4) 如需查看已安装的全部技能，调用 list_installed_skills()\n"
             + "  (5) 如需删除技能，调用 uninstall_skill(skill_name)\n"
@@ -531,6 +548,34 @@ class SkillAgentTool(Tool):
                 return str(arguments.get("temp_relative_path") or "")
             return ""
 
+        def _debug_command(arguments: dict) -> str:
+            command = arguments.get("command")
+            if not isinstance(command, list):
+                return ""
+            # Command arguments are deliberately only exposed in debug mode. This
+            # can contain paths or credentials supplied by a trusted developer.
+            return " ".join(str(part) for part in command)
+
+        def _user_safe_detail(detail: str) -> str:
+            """Keep progress meaningful without exposing paths or implementation details."""
+            if not detail:
+                return ""
+            return os.path.basename(detail.replace("\\", "/")) or "当前资源"
+
+        def _friendly_error(tool_name: str, result: dict) -> str:
+            raw = str(result.get("error") or "")
+            if "not allowed" in raw or "requires allow_unsafe" in raw:
+                return "该操作受当前安全策略限制"
+            if "timeout" in raw:
+                return "处理超时，已停止本步骤"
+            if "not found" in raw:
+                return "所需资源或运行环境暂不可用"
+            if "invalid" in raw or "参数" in raw:
+                return "执行参数不完整，正在调整处理方式"
+            if tool_name in ("run_skill_command", "run_temp_command"):
+                return "处理步骤未完成，正在根据结果调整"
+            return "本步骤暂未完成，正在继续处理"
+
         # 工具调用进度消息：verbose 开启时展示细节，关闭时只输出简洁描述
         _tool_step_counter = 0
         _non_verbose_header_emitted = False
@@ -553,41 +598,41 @@ class SkillAgentTool(Tool):
                 return f"{seconds * 1000:.0f}ms"
             return f"{seconds:.1f}s"
 
-        def emit_tool_progress(tool_name: str, detail: str = "") -> Generator[ToolInvokeMessage]:
+        def emit_tool_progress(tool_name: str, detail: str = "", arguments: dict | None = None) -> Generator[ToolInvokeMessage]:
             nonlocal _tool_step_counter, _non_verbose_header_emitted
             _tool_step_counter += 1
             _step_start_times.append(_time_mod.time())
             label = _step_label()
 
             if not verbose:
-                # ── 非详细模式：按阶段展示简洁但信息充足的标题 ──
+                # ── 面向用户模式：展示业务阶段，不展示工具、路径或命令 ──
                 _phase_map = {
-                    "get_skill_metadata": ("🔍", "查阅技能说明书"),
-                    "list_skill_files": ("📂", "浏览技能文件"),
-                    "read_skill_file": ("📄", "读取技能文件"),
-                    "run_skill_command": ("⚡", "执行技能命令"),
-                    "write_temp_file": ("📝", "写入文件"),
-                    "read_temp_file": ("📖", "读取文件"),
-                    "list_temp_files": ("📋", "查看文件列表"),
-                    "run_temp_command": ("⚡", "执行命令"),
-                    "export_temp_file": ("📦", "标记交付文件"),
-                    "install_skill": ("🔧", "安装技能"),
-                    "list_installed_skills": ("🔧", "查看已安装技能"),
-                    "uninstall_skill": ("🗑️", "卸载技能"),
-                    "update_skill": ("🔄", "更新技能"),
-                    "get_session_context": ("ℹ️", "获取会话上下文"),
+                    "get_skill_metadata": ("🔍", "确认处理方案与适用能力"),
+                    "list_skill_files": ("📂", "准备处理所需资源"),
+                    "read_skill_file": ("📄", "提取处理规则与关键要求"),
+                    "run_skill_command": ("⚙️", "执行核心处理步骤"),
+                    "write_temp_file": ("📝", "生成处理中间内容"),
+                    "read_temp_file": ("📖", "校验已生成的内容"),
+                    "list_temp_files": ("📋", "核对生成结果"),
+                    "run_temp_command": ("⚙️", "生成或转换交付内容"),
+                    "export_temp_file": ("📦", "整理最终交付文件"),
+                    "install_skill": ("🔧", "配置所需处理能力"),
+                    "list_installed_skills": ("🔧", "检查可用处理能力"),
+                    "uninstall_skill": ("🗑️", "移除指定处理能力"),
+                    "update_skill": ("🔄", "更新处理能力"),
+                    "get_session_context": ("ℹ️", "恢复本次任务上下文"),
                 }
                 icon, phase = _phase_map.get(tool_name, ("⚙️", "处理中"))
                 # 非详细模式下也带上操作对象，让用户知道具体在做什么
-                detail_short = _shorten_text(detail, 40) if detail else ""
+                detail_short = _shorten_text(_user_safe_detail(detail), 40) if detail else ""
                 desc = f"{phase}" + (f"：{detail_short}" if detail_short else "")
                 if not _non_verbose_header_emitted:
                     _non_verbose_header_emitted = True
-                    yield self.create_text_message("\n⏳ **正在处理中…**\n")
+                    yield self.create_text_message("\n⏳ **正在处理你的任务**\n")
                 yield self.create_text_message(f"  {label} {icon} {desc}\n")
                 return
 
-            # ── 详细模式：展示分类图标 + 步骤编号 + 操作对象 + 参数摘要 ──
+            # ── 调试模式：展示分类、工具参数与实际命令，方便定位问题 ──
             _detail_map = {
                 "get_skill_metadata": ("🔍", f"查阅技能《{detail}》说明书，获取触发条件与执行流程"),
                 "list_skill_files": ("📂", f"浏览技能《{detail}》文件结构，了解可用资源"),
@@ -606,6 +651,13 @@ class SkillAgentTool(Tool):
             }
             icon, desc = _detail_map.get(tool_name, ("⚙️", f"执行 {tool_name}"))
             yield self.create_text_message(f"{icon} {label} {desc}\n")
+            if arguments:
+                command = _debug_command(arguments)
+                if command:
+                    yield self.create_text_message(f"  ↳ command: `{command}`\n")
+                cwd_relative = arguments.get("cwd_relative")
+                if cwd_relative:
+                    yield self.create_text_message(f"  ↳ cwd_relative: `{cwd_relative}`\n")
 
         def emit_tool_result(tool_name: str, result: Any) -> Generator[ToolInvokeMessage]:
             """工具执行完后展示简短结果摘要。
@@ -621,10 +673,17 @@ class SkillAgentTool(Tool):
             if _step_start_times:
                 elapsed = _time_mod.time() - _step_start_times[-1]
                 elapsed_str = f"（{_fmt_elapsed(elapsed)}）"
-            # 出错时展示简短错误提示（始终展示）
+            # Debug mode receives the raw failure; user mode receives a useful,
+            # non-technical status without paths, commands or stderr.
             err = result.get("error")
             if err:
-                yield self.create_text_message(f"  ⚠️ {err} {elapsed_str}\n")
+                if verbose:
+                    yield self.create_text_message(f"  ⚠️ {err} {elapsed_str}\n")
+                    detail = result.get("exception") or result.get("stderr") or result.get("_diagnostic")
+                    if detail:
+                        yield self.create_text_message(f"  ↳ detail: {_shorten_text(redact_user_visible_text(detail), 2000)}\n")
+                else:
+                    yield self.create_text_message(f"  ⚠️ {_friendly_error(tool_name, result)} {elapsed_str}\n")
                 return
             # ── 始终展示结果的工具（不受 verbose 限制） ──
             if tool_name == "list_installed_skills":
@@ -647,7 +706,24 @@ class SkillAgentTool(Tool):
                     if len(skills_list) > 30:
                         yield self.create_text_message(f"    … 还有 {len(skills_list) - 30} 个技能未展示\n")
                 return
-            # ── 以下仅在 verbose 模式下展示 ──
+            if not verbose and tool_name in ("get_skill_metadata", "list_skill_files", "read_skill_file", "read_temp_file", "write_temp_file", "list_temp_files", "run_skill_command", "run_temp_command", "export_temp_file", "install_skill", "uninstall_skill", "update_skill"):
+                _user_result_map = {
+                    "get_skill_metadata": "已确定处理方案，开始执行",
+                    "list_skill_files": "处理资源已准备完成",
+                    "read_skill_file": "已提取完成任务所需规则",
+                    "read_temp_file": "已完成内容校验",
+                    "write_temp_file": "中间内容已生成",
+                    "list_temp_files": "已核对当前生成结果",
+                    "run_skill_command": "核心处理步骤已完成",
+                    "run_temp_command": "内容生成或转换已完成",
+                    "export_temp_file": "最终交付文件已准备完成",
+                    "install_skill": "所需处理能力已配置完成",
+                    "uninstall_skill": "指定处理能力已移除",
+                    "update_skill": "处理能力已更新完成",
+                }
+                yield self.create_text_message(f"  ✔️ {_user_result_map[tool_name]} {elapsed_str}\n")
+                return
+            # ── 以下仅在 debug 模式下展示 ──
             if not verbose:
                 return
             # 按工具类型展示关键结果（带耗时和更详细的摘要）
@@ -669,15 +745,25 @@ class SkillAgentTool(Tool):
             elif tool_name in ("run_skill_command", "run_temp_command"):
                 rc = result.get("returncode")
                 stdout = result.get("stdout", "")
+                actual_command = result.get("command") or []
+                cwd = result.get("cwd") or ""
+                if isinstance(actual_command, list):
+                    yield self.create_text_message(f"  ↳ resolved command: `{_shorten_text(' '.join(str(x) for x in actual_command), 2000)}`\n")
+                if cwd:
+                    yield self.create_text_message(f"  ↳ cwd: `{redact_user_visible_text(cwd)}`\n")
                 if rc == 0:
                     out_len = len(stdout)
                     out_preview = _shorten_text(stdout.strip(), 60)
                     preview_hint = f"，预览：{out_preview}" if out_preview else ""
                     yield self.create_text_message(f"  ✔️ 执行成功（输出 {out_len} 字符）{elapsed_str}{preview_hint}\n")
+                    if stdout:
+                        yield self.create_text_message("  ↳ stdout:\n```text\n" + _shorten_text(redact_user_visible_text(stdout), 4000) + "\n```\n")
                 else:
                     stderr = result.get("stderr", "")
                     err_preview = _shorten_text(stderr.strip(), 60)
                     yield self.create_text_message(f"  ❌ 执行失败（返回码 {rc}）{elapsed_str}，错误：{err_preview}\n")
+                    if stderr:
+                        yield self.create_text_message("  ↳ stderr:\n```text\n" + _shorten_text(redact_user_visible_text(stderr), 4000) + "\n```\n")
             elif tool_name == "write_temp_file":
                 nbytes = result.get("bytes", 0)
                 yield self.create_text_message(f"  ✔️ 已写入 {nbytes} 字节 {elapsed_str}\n")
@@ -1042,7 +1128,7 @@ class SkillAgentTool(Tool):
 
                         # 构建工具操作描述并执行（统一入口，消除重复代码）
                         _tp_detail = _build_tool_detail(tool_name, arguments)
-                        yield from emit_tool_progress(tool_name, _tp_detail)
+                        yield from emit_tool_progress(tool_name, _tp_detail, arguments)
 
                         result = _execute_tool(tool_name, arguments)
                         validation_failure_streak = 0  # 工具成功执行，重置连续失败计数
@@ -1071,7 +1157,7 @@ class SkillAgentTool(Tool):
                             )
                         except Exception:
                             has_files = False
-                        if final_file_meta or has_files:
+                        if final_file_meta:
                             final_text = "已生成文件。"
                             break
                     continue
@@ -1206,7 +1292,7 @@ class SkillAgentTool(Tool):
 
                 # JSON 协议路径：统一使用 _execute_tool 执行
                 _j_detail = _build_tool_detail(name, arguments)
-                yield from emit_tool_progress(name, _j_detail)
+                yield from emit_tool_progress(name, _j_detail, arguments)
 
                 result = _execute_tool(name, arguments)
                 validation_failure_streak = 0  # 工具成功执行，重置连续失败计数
@@ -1228,7 +1314,7 @@ class SkillAgentTool(Tool):
                     )
                 except Exception:
                     has_files = False
-                if final_file_meta or has_files:
+                if final_file_meta:
                     final_text = "已生成文件。"
                 else:
                     final_text = f"❌超过最大执行轮数 max_steps={max_steps}，仍未得到最终结果"
@@ -1255,27 +1341,16 @@ class SkillAgentTool(Tool):
             except Exception:
                 pass
 
+            # Only explicitly marked files are deliverables.  In particular, never
+            # return uploads, prompts, logs or intermediate scripts as a fallback.
             files_to_send: list[tuple[str, str, str, str]] = []
-
-            # 自动兜底：如果有中间文件但未调用 export_temp_file，自动将所有临时文件作为交付文件
-            if not files_to_send and has_any_files:
+            for rel_path, meta in final_file_meta.items():
                 try:
-                    for entry in temp_file_entries:
-                        rel_path = str(entry.get("relative_path") or "").replace("\\", "/").lstrip("/")
-                        if not rel_path:
-                            continue
-                        try:
-                            abs_path = _safe_join(session_dir, rel_path)
-                        except Exception:
-                            continue
-                        if not os.path.isfile(abs_path):
-                            continue
-                        filename = os.path.basename(rel_path)
-                        mime_type = _guess_mime_type(filename)
-                        files_to_send.append((rel_path, abs_path, mime_type, filename))
-                    _dbg(f"auto_exported {len(files_to_send)} temp files (export_temp_file was not called)")
+                    abs_path = _safe_join(session_dir, rel_path)
                 except Exception:
-                    files_to_send = []
+                    continue
+                if os.path.isfile(abs_path):
+                    files_to_send.append((rel_path, abs_path, meta["mime_type"], meta["filename"]))
 
             assistant_text_for_history = ""
             if final_text and final_text.strip():

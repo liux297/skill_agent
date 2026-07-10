@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import zipfile
+import uuid
 from typing import Any
 
 from utils.skill_agent_exec import (
@@ -14,6 +15,12 @@ from utils.skill_agent_exec import (
     _missing_executable_hint,
     _resolve_executable,
     _skill_contains_python_module,
+)
+from utils.skill_agent_constants import (
+    ALLOWED_COMMANDS,
+    MAX_ARCHIVE_MEMBERS,
+    MAX_ARCHIVE_UNCOMPRESSED_BYTES,
+    UNSAFE_COMMANDS,
 )
 from utils.skill_agent_paths import (
     _normalize_relative_file_path,
@@ -87,6 +94,7 @@ class _AgentRuntime:
         custom_variables: dict[str, str] | None = None,
         max_stdout_chars: int = 30000,
         allowed_commands: set[str],  # 由调用方传入（yaml 默认值或用户自定义）
+        allow_unsafe_commands: bool = False,
     ) -> None:
         self.skills_root = skills_root
         self.session_dir = session_dir
@@ -94,7 +102,11 @@ class _AgentRuntime:
         self.memory_turns = memory_turns
         self.custom_variables = custom_variables or {}
         self.max_stdout_chars = max_stdout_chars
-        self.allowed_commands = allowed_commands
+        # The caller may narrow the normal allow-list, but cannot enable shells,
+        # installers or network clients without an explicit opt-in.
+        requested = {str(x).lower() for x in allowed_commands}
+        self.allow_unsafe_commands = allow_unsafe_commands
+        self.allowed_commands = requested & (ALLOWED_COMMANDS | (UNSAFE_COMMANDS if allow_unsafe_commands else set()))
         self._skill_metadata_cache: dict[str, dict[str, Any]] = {}
         self._skill_files_listed: set[str] = set()
 
@@ -269,9 +281,11 @@ class _AgentRuntime:
                     "returncode": result.returncode,
                     "stdout": stdout,
                     "stderr": stderr,
+                    "command": command,
+                    "cwd": cwd,
                     "_diagnostic": " | ".join(diag_parts),
                 }
-            return {"returncode": result.returncode, "stdout": stdout, "stderr": stderr, "cwd": cwd}
+            return {"returncode": result.returncode, "stdout": stdout, "stderr": stderr, "command": command, "cwd": cwd}
         except FileNotFoundError as e:
             return {"error": "executable_not_found", "exe": str(command[0] or exe_fallback), "exception": str(e)}
         except subprocess.TimeoutExpired as e:
@@ -293,6 +307,10 @@ class _AgentRuntime:
             return {"error": "command must be a non-empty list"}
         skill_path = _safe_join(self.skills_root, skill_name)
         exe = command[0]
+        if not self.allow_unsafe_commands and auto_install:
+            return {"error": "auto_install requires allow_unsafe_commands=true"}
+        if not self.allow_unsafe_commands and exe in ("python", "python3", "node") and ("-c" in command or "-e" in command or "-" in command[1:]):
+            return {"error": "inline code execution requires allow_unsafe_commands=true"}
         if exe in ("python", "python3"):
             if "-m" in command:
                 module_index = command.index("-m") + 1
@@ -309,7 +327,7 @@ class _AgentRuntime:
                     if not module_check.get("ok"):
                         return module_check
             command = [sys.executable] + command[1:]
-        elif exe not in self.allowed_commands:
+        elif exe.lower() not in self.allowed_commands:
             return {"error": f"command not allowed: {exe}"}
         # 技能命令额外重写 --out 参数到 session_dir
         command = _rewrite_out_arg_to_session_dir(command, session_dir=self.session_dir)
@@ -322,6 +340,10 @@ class _AgentRuntime:
         if not command:
             return {"error": "command must be a non-empty list"}
         exe = command[0]
+        if not self.allow_unsafe_commands and auto_install:
+            return {"error": "auto_install requires allow_unsafe_commands=true"}
+        if not self.allow_unsafe_commands and exe in ("python", "python3", "node") and ("-c" in command or "-e" in command or "-m" in command or "-" in command[1:]):
+            return {"error": "inline/module execution in temp requires allow_unsafe_commands=true"}
         if exe in ("python", "python3"):
             if "-m" in command:
                 module_index = command.index("-m") + 1
@@ -331,7 +353,7 @@ class _AgentRuntime:
                     if not module_check.get("ok"):
                         return module_check
             command = [sys.executable] + command[1:]
-        elif exe not in self.allowed_commands:
+        elif exe.lower() not in self.allowed_commands:
             return {"error": f"command not allowed: {exe}"}
         os.makedirs(self.session_dir, exist_ok=True)
         cwd = self.session_dir if not cwd_relative else _safe_join(self.session_dir, cwd_relative)
@@ -380,48 +402,62 @@ class _AgentRuntime:
         if not os.path.exists(src):
             return {"error": "source_path 不存在", "source_path": source_path, "session_dir": self.session_dir}
         dst = _safe_join(self.skills_root, safe_name)
-        # 如果目标已存在，先删除旧版本
-        if os.path.isdir(dst):
-            shutil.rmtree(dst, ignore_errors=True)
-        elif os.path.exists(dst):
-            os.remove(dst)
+        staging = _safe_join(self.skills_root, f".{safe_name}.staging-{uuid.uuid4().hex}")
         try:
             if src.lower().endswith(".zip"):
-                # 安全解压：逐文件校验路径，防止 zip slip 路径穿越攻击
-                os.makedirs(dst, exist_ok=True)
+                # Validate archive size before writing anything to disk.
+                os.makedirs(staging, exist_ok=False)
                 with zipfile.ZipFile(src, "r") as zf:
-                    for info in zf.infolist():
+                    infos = zf.infolist()
+                    if len(infos) > MAX_ARCHIVE_MEMBERS:
+                        raise ValueError(f"压缩包文件数超过限制（{MAX_ARCHIVE_MEMBERS}）")
+                    total_size = sum(max(0, info.file_size) for info in infos)
+                    if total_size > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                        raise ValueError("压缩包解压后大小超过限制")
+                    for info in infos:
                         name = info.filename
                         if not name:
                             continue
                         # 拒绝绝对路径和 .. 路径穿越
                         if name.startswith("/") or name.startswith("\\") or ".." in name:
-                            return {"error": "压缩包包含非法路径（可能为 zip slip 攻击）", "source": src}
-                        target_path = os.path.realpath(os.path.join(dst, name))
+                            raise ValueError("压缩包包含非法路径（可能为 zip slip 攻击）")
+                        target_path = os.path.realpath(os.path.join(staging, name))
                         # 确保解压目标仍在 dst 目录内
-                        if not target_path.startswith(os.path.realpath(dst) + os.sep):
-                            return {"error": "压缩包包含越权路径（可能为 zip slip 攻击）", "source": src}
+                        if not target_path.startswith(os.path.realpath(staging) + os.sep):
+                            raise ValueError("压缩包包含越权路径（可能为 zip slip 攻击）")
                         if info.is_dir():
                             os.makedirs(target_path, exist_ok=True)
                         else:
                             os.makedirs(os.path.dirname(target_path), exist_ok=True)
                             with zf.open(info) as src_f, open(target_path, "wb") as dst_f:
-                                import shutil
                                 shutil.copyfileobj(src_f, dst_f)
             else:
                 # 目录：直接复制
-                shutil.copytree(src, dst)
+                shutil.copytree(src, staging)
+            skill_md = os.path.join(staging, "SKILL.md")
+            if not os.path.isfile(skill_md):
+                raise ValueError("安装包根目录缺少 SKILL.md")
+            backup = _safe_join(self.skills_root, f".{safe_name}.backup-{uuid.uuid4().hex}")
+            if os.path.exists(dst):
+                os.replace(dst, backup)
+            try:
+                os.replace(staging, dst)
+            except Exception:
+                if os.path.exists(backup):
+                    os.replace(backup, dst)
+                raise
+            if os.path.exists(backup):
+                shutil.rmtree(backup)
         except Exception as e:
+            shutil.rmtree(staging, ignore_errors=True)
             return {"error": f"安装失败: {str(e)}", "source": src, "destination": dst}
         # 清除该技能的 metadata 缓存，使其立即可被 load_skills_index 发现
         self._skill_metadata_cache.pop(safe_name, None)
         # 验证安装结果
-        skill_md = os.path.join(dst, "SKILL.md")
-        has_skill_md = os.path.isfile(skill_md)
         return {
             "skill": safe_name,
             "installed_to": dst,
-            "has_skill_md": has_skill_md,
+            "has_skill_md": True,
             "source_type": "zip" if src.lower().endswith(".zip") else "directory",
         }
 
@@ -471,7 +507,7 @@ class _AgentRuntime:
         return {"skill": safe_name, "uninstalled": True, "path": target}
 
     def update_skill(self, *, skill_name: str, source_path: str) -> dict[str, Any]:
-        """覆盖式更新技能：先删除旧版本，再从 source_path 重新安装。"""
+        """覆盖式更新技能：通过 install_skill 的 staging + replace 保留旧版本直到新版本可用。"""
         if not self.skills_root:
             return {"error": "skills_root 未配置，无法更新技能。"}
         safe_name = skill_name.replace("/", "").replace("\\", "").replace("..", "").strip()
@@ -481,13 +517,9 @@ class _AgentRuntime:
         # 检查旧版本是否存在
         if not os.path.isdir(target):
             return {"error": f"技能 '{safe_name}' 不存在，无法更新。请先使用 install_skill 安装。", "skill_name": safe_name}
-        # 先删除
-        try:
-            shutil.rmtree(target, ignore_errors=False)
-        except Exception as e:
-            return {"error": f"删除旧版本失败: {str(e)}", "skill_name": safe_name}
-        # 再安装（复用 install_skill 的逻辑）
+        # install_skill performs an atomic replacement and restores the old version
+        # if activation fails.
         result = self.install_skill(source_path=source_path, skill_name=safe_name)
         if result.get("error"):
-            return {**result, "note": "更新过程中删除了旧版本但新版本安装失败，当前处于未安装状态"}
+            return {**result, "note": "新版本未安装成功，已保留旧版本"}
         return {**result, "updated": True}

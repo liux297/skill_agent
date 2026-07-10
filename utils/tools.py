@@ -6,8 +6,8 @@ import os
 import re
 import sys
 import uuid
-from typing import Any, TypeVar
 from urllib.parse import urlparse
+from typing import Any, TypeVar
 from urllib.request import Request, urlopen
 
 
@@ -68,8 +68,11 @@ def _guess_mime_type(filename: str) -> str:
     return mime_type or "application/octet-stream"
 
 def _safe_join(root: str, relative_path: str) -> str:
-    root_abs = os.path.abspath(root)
-    joined = os.path.abspath(os.path.join(root_abs, relative_path))
+    # abspath alone does not protect against a symlink placed below root.  Resolve
+    # both paths before the containment check so temp/skill files cannot escape
+    # their assigned workspace through an existing symlink.
+    root_abs = os.path.realpath(root)
+    joined = os.path.realpath(os.path.join(root_abs, relative_path))
     if os.path.commonpath([root_abs, joined]) != root_abs:
         raise ValueError("path is outside root")
     return joined
@@ -420,7 +423,23 @@ def _safe_filename(preferred_name: str | None, fallback_ext: str = "") -> str:
             return base
     return f"{uuid.uuid4().hex}{fallback_ext}"
 
-def _download_file_content(url: str, timeout: int = 30) -> bytes:
+def _download_file_content(url: str, timeout: int = 30, max_bytes: int = 50 * 1024 * 1024) -> bytes:
+    parsed = urlparse(url or "")
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:
+        raise ValueError("仅支持不含凭证的 http(s) 上传文件 URL")
     req = Request(url, headers={"User-Agent": "dify-plugin-skill/1.0"})
     with urlopen(req, timeout=timeout) as resp:
-        return resp.read()
+        content_length = resp.headers.get("Content-Length")
+        if content_length and int(content_length) > max_bytes:
+            raise ValueError(f"上传文件超过大小限制（{max_bytes} bytes）")
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = resp.read(min(1024 * 1024, max_bytes - total + 1))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                raise ValueError(f"上传文件超过大小限制（{max_bytes} bytes）")
+            chunks.append(chunk)
+        return b"".join(chunks)

@@ -1,13 +1,19 @@
 """临时测试文件：验证代码修复的正确性"""
 import json
 import unittest
+import tempfile
+from pathlib import Path
 
 
 # ========== 导入项目模块 ==========
 import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
-from utils.skill_agent_constants import ALLOWED_COMMANDS
+from utils.skill_agent_constants import ALLOWED_COMMANDS, UNSAFE_COMMANDS
+from utils.skill_agent_runtime import _AgentRuntime
+from utils.tools import _safe_join
+from dify_plugin.entities.tool import ToolInvokeMessage
+from tools.skill_agent import SkillAgentTool
 
 
 # ========== 复制待测试的函数逻辑 ==========
@@ -110,6 +116,16 @@ class TestVerboseParsing(unittest.TestCase):
     def test_verbose_string_zero(self):
         self.assertFalse(self._parse_verbose("0"))
 
+
+class TestStreamingOutput(unittest.TestCase):
+    def test_text_messages_use_dify_streaming_variable(self):
+        tool = object.__new__(SkillAgentTool)
+        tool.response_type = ToolInvokeMessage
+        message = tool.create_text_message("progress")
+        self.assertEqual(message.type.value, "variable")
+        self.assertEqual(message.message.variable_name, "text")
+        self.assertEqual(message.message.variable_value, "progress")
+        self.assertTrue(message.message.stream)
 
 class TestShouldEmitUserText(unittest.TestCase):
     """测试 should_emit_user_text 函数"""
@@ -239,7 +255,7 @@ class TestSessionDirNaming(unittest.TestCase):
 
 
 class TestAllowedCommandsWhitelist(unittest.TestCase):
-    """测试 ALLOWED_COMMANDS 白名单包含新增的命令"""
+    """默认执行面不应包含解释器外壳、安装器或网络客户端。"""
 
     def test_python_in_whitelist(self):
         self.assertIn("python", ALLOWED_COMMANDS)
@@ -247,23 +263,11 @@ class TestAllowedCommandsWhitelist(unittest.TestCase):
     def test_python3_in_whitelist(self):
         self.assertIn("python3", ALLOWED_COMMANDS, "python3 必须在白名单中，否则 macOS/Linux 上命令会被拦截")
 
-    def test_pip_in_whitelist(self):
-        self.assertIn("pip", ALLOWED_COMMANDS)
-
-    def test_pip3_in_whitelist(self):
-        self.assertIn("pip3", ALLOWED_COMMANDS, "pip3 必须在白名单中")
-
-    def test_sh_in_whitelist(self):
-        self.assertIn("sh", ALLOWED_COMMANDS, "sh 必须在白名单中")
-
-    def test_bash_in_whitelist(self):
-        self.assertIn("bash", ALLOWED_COMMANDS)
-
     def test_node_in_whitelist(self):
         self.assertIn("node", ALLOWED_COMMANDS)
 
-    def test_npm_in_whitelist(self):
-        self.assertIn("npm", ALLOWED_COMMANDS)
+    def test_unsafe_commands_not_in_default_whitelist(self):
+        self.assertFalse(ALLOWED_COMMANDS & UNSAFE_COMMANDS)
 
     def test_unsafe_command_not_in_whitelist(self):
         """危险命令不应在白名单中"""
@@ -302,15 +306,13 @@ class TestPython3Rewrite(unittest.TestCase):
         self.assertEqual(result["command"][0], sys.executable)
         self.assertIn("-m", result["command"])
 
-    def test_sh_not_rewritten_but_allowed(self):
+    def test_sh_blocked_by_default(self):
         result = self._simulate_exe_check(["sh", "script.sh"])
-        self.assertFalse(result.get("rewritten"))
-        self.assertNotIn("error", result)
+        self.assertIn("error", result)
 
-    def test_bash_not_rewritten_but_allowed(self):
+    def test_bash_blocked_by_default(self):
         result = self._simulate_exe_check(["bash", "script.sh"])
-        self.assertFalse(result.get("rewritten"))
-        self.assertNotIn("error", result)
+        self.assertIn("error", result)
 
     def test_disallowed_command_blocked(self):
         result = self._simulate_exe_check(["rm", "-rf", "/"])
@@ -321,6 +323,54 @@ class TestPython3Rewrite(unittest.TestCase):
         result = self._simulate_exe_check(["node", "app.js"])
         self.assertFalse(result.get("rewritten"))
         self.assertNotIn("error", result)
+
+
+class TestWorkspaceContainment(unittest.TestCase):
+    def test_safe_join_rejects_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "session"
+            root.mkdir()
+            (root / "outside").symlink_to(Path(td), target_is_directory=True)
+            with self.assertRaises(ValueError):
+                _safe_join(str(root), "outside/secret.txt")
+
+
+class TestSkillInstallSafety(unittest.TestCase):
+    def _runtime(self, root: Path, session: Path) -> _AgentRuntime:
+        return _AgentRuntime(
+            skills_root=str(root), session_dir=str(session), max_steps=1,
+            memory_turns=1, allowed_commands=set(ALLOWED_COMMANDS),
+        )
+
+    def test_invalid_update_keeps_existing_skill(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            root, session = base / "skills", base / "session"
+            root.mkdir(); session.mkdir()
+            old = root / "demo"; old.mkdir()
+            (old / "SKILL.md").write_text("# old", encoding="utf-8")
+            bad = session / "bad"; bad.mkdir()
+            result = self._runtime(root, session).update_skill(skill_name="demo", source_path="bad")
+            self.assertIn("error", result)
+            self.assertEqual((old / "SKILL.md").read_text(encoding="utf-8"), "# old")
+
+    def test_unsafe_commands_require_explicit_opt_in(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "skills"; session = Path(td) / "session"
+            root.mkdir(); session.mkdir()
+            default = self._runtime(root, session)
+            opted_in = _AgentRuntime(skills_root=str(root), session_dir=str(session), max_steps=1,
+                                     memory_turns=1, allowed_commands={"bash"}, allow_unsafe_commands=True)
+            self.assertNotIn("bash", default.allowed_commands)
+            self.assertIn("bash", opted_in.allowed_commands)
+
+    def test_safe_mode_rejects_inline_python_and_auto_install(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "skills"; session = Path(td) / "session"
+            root.mkdir(); session.mkdir()
+            runtime = self._runtime(root, session)
+            self.assertIn("error", runtime.run_temp_command(command=["python", "-c", "print(1)"]))
+            self.assertIn("error", runtime.run_temp_command(command=["python", "-m", "pip"], auto_install=True))
 
 
 if __name__ == "__main__":

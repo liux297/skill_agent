@@ -8,22 +8,19 @@ import uuid
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
-from urllib.request import Request, urlopen
 from zipfile import ZipFile
 
 from dify_plugin import Tool
 from dify_plugin.entities.tool import ToolInvokeMessage
 
 # 复用 utils/tools.py 中的公共工具函数，消除重复实现
-from utils.tools import _extract_url_and_name, _infer_ext_from_url, _safe_filename
+from utils.skill_agent_constants import MAX_ARCHIVE_MEMBERS, MAX_ARCHIVE_UNCOMPRESSED_BYTES, MAX_UPLOAD_BYTES
+from utils.tools import _download_file_content, _extract_url_and_name, _infer_ext_from_url, _safe_filename
 
 
 def get_file_content(url: str, timeout: int = 30) -> bytes:
     try:
-        req = Request(url, headers={"User-Agent": "dify-plugin-skill/1.0"})
-        with urlopen(req, timeout=timeout) as resp:
-            return resp.read()
+        return _download_file_content(url, timeout=timeout, max_bytes=MAX_UPLOAD_BYTES)
     except Exception as e:
         raise RuntimeError(f"文件下载失败: {str(e)}") from e
 
@@ -54,7 +51,12 @@ def _is_within_dir(base: Path, target: Path) -> bool:
 def _safe_extract_zip(zip_path: Path, dest_dir: Path) -> None:
     dest_dir.mkdir(parents=True, exist_ok=True)
     with ZipFile(zip_path) as zf:
-        for info in zf.infolist():
+        infos = zf.infolist()
+        if len(infos) > MAX_ARCHIVE_MEMBERS:
+            raise RuntimeError(f"压缩包文件数超过限制（{MAX_ARCHIVE_MEMBERS}）")
+        if sum(max(0, info.file_size) for info in infos) > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+            raise RuntimeError("压缩包解压后大小超过限制")
+        for info in infos:
             name = info.filename
             if not name:
                 continue

@@ -1,7 +1,7 @@
 ## Skill Agent
 
 **Author:** [liux297](https://github.com/liux297) · 297218348@qq.com
-**Version:** 0.2.11
+**Version:** 0.2.12
 **Type:** Tool Plugin
 **License:** Apache-2.0
 **Repository:** https://github.com/liux297/skill_agent
@@ -15,9 +15,9 @@ Skill Agent is a universal Agent plugin built on the "Skill Progressive Disclosu
 - **Dual-protocol smart switching**: Auto-detects model Function Calling capability, compatible with both FC and JSON protocols
 - **Progressive disclosure**: Skill index lookup first, then read SKILL.md, then read files/execute commands as needed
 - **Context smart compression**: Token-based context management with auto-recovery mechanism
-- **Command whitelist sandbox**: Safe script execution control to prevent dangerous commands
+- **Safer execution defaults**: Shells, package managers, and network clients require an explicit high-risk opt-in; use only with trusted skills
 - **File delivery**: Agent returns files from the temp session directory as tool output
-- **Streaming output**: Real-time natural language streaming output, hiding internal protocol messages
+- **True streaming output**: Progress and final text use Dify streaming variables for incremental typewriter-style display instead of being returned in one batch
 - **Custom variable injection**: Supports `custom_variables` JSON key-value pairs with `${var}` template replacement and environment variable passing
 - **Verbose mode toggle**: Debug-level detailed output vs user-facing concise output
 - **Custom system prompt**: Override or extend the default Agent behavior instructions
@@ -50,7 +50,8 @@ This plugin provides two tools:
 | `history_turns` | number | Yes | 3 | Cross-turn history injection rounds |
 | `system_prompt` | string | No | - | Custom system prompt |
 | `custom_variables` | string | No | - | JSON key-value pairs, e.g. `{"current_user":"Alice"}` |
-| `verbose` | boolean | Yes | true | Show detailed execution progress |
+| `verbose` | boolean | Yes | false | Debug mode: show commands, paths, parameters and command output |
+| `allow_unsafe_commands` | boolean | Yes | false | Enables shells, installers and network clients for trusted self-hosted skills only |
 
 ### Usage in Dify
 
@@ -80,7 +81,10 @@ Ensure your LLM and provider plugin support function calling.
 **4. Skill-related issues**
 Ensure your skill materials and scripts are complete. For Node.js script skills, install Node.js in Dify's `plugin_daemon` container first.
 
-**5. Using custom_variables**
+**5. Trusted skills and high-risk commands**
+By default, shell commands, package installation, and network download clients are blocked. Enable `allow_unsafe_commands` only when every installed skill and its dependencies are trusted, then explicitly add only the required executable to `allowed_commands`.
+
+**6. Using custom_variables**
 Pass a JSON string like `{"current_user":"Alice","team_id":"T123"}`. In SKILL.md or scripts, reference via `${current_user}` or environment variable `$CURRENT_USER`.
 
 ### Contact

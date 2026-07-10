@@ -15,7 +15,7 @@ The Plugin may process the following data to provide its functionality:
 - **User input**: the `query` parameter and related conversation context passed by Dify.
 - **Custom variables**: the `custom_variables` parameter (JSON key-value pairs) optionally provided by the workflow caller to inject runtime context (e.g., user identity, team ID). These values are used only for template replacement in SKILL.md and as environment variables for subprocess commands within a single session.
 - **Model selection/configuration**: the `model` selector and parameters used to call the LLM through Dify's model runtime.
-- **Generated artifacts**: files created in the Plugin's temporary session directory during execution (e.g., `.txt`, `.md`, `.pdf`, images).
+- **Generated artifacts**: files explicitly marked by the agent for delivery from the Plugin's temporary session directory (e.g., `.txt`, `.md`, `.pdf`, images). Uploaded files and unmarked intermediate files are not returned as deliverables.
 - **Operational logs**: debug logs printed by the Plugin runtime for troubleshooting (may include tool call names, file paths under the temp directory, and execution status). In non-verbose mode, detailed paths are redacted from user-visible output.
 
 The Plugin does **not** intentionally collect personal data beyond what is required to execute the user's request.
@@ -56,7 +56,7 @@ Retention is primarily controlled by:
 
 To reduce security risks:
 
-- The Plugin restricts command execution to a whitelist of executables (`python`, `node`, `npm`, etc.).
+- The Plugin uses a default allow-list and blocks shells, package managers, and network clients unless an administrator explicitly enables high-risk command mode for trusted skills.
 - File reads/writes are constrained to approved directories (skill folder and temp session folder).
 - User-visible output redacts absolute file paths to prevent information leakage.
 - Custom variables are sanitized before use as environment variable keys (converted to uppercase, special chars replaced with underscores).
