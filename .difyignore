@@ -177,6 +177,11 @@ cython_debug/
 .gh-config/
 test_fixes.py
 .trae/
+.assets/
+docs/
+Euraxluo/
+zhengyanglsun/
+CONTRIBUTING.md
 
 # Mac
 .DS_Store
@@ -191,4 +196,3 @@ temp/
 skills/
 screenshot_*.png
 dify-plugin-*
-

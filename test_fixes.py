@@ -11,9 +11,10 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 from utils.skill_agent_constants import ALLOWED_COMMANDS, UNSAFE_COMMANDS
 from utils.skill_agent_runtime import _AgentRuntime
+from utils.skill_agent_runtime import _extract_declared_skill_version
 from utils.tools import _safe_join
 from dify_plugin.entities.tool import ToolInvokeMessage
-from tools.skill_agent import SkillAgentTool
+from tools.skill_agent import SkillAgentTool, _completed_process_markup, _normalize_user_answer, _open_details_markup
 
 
 # ========== 复制待测试的函数逻辑 ==========
@@ -117,16 +118,6 @@ class TestVerboseParsing(unittest.TestCase):
         self.assertFalse(self._parse_verbose("0"))
 
 
-class TestStreamingOutput(unittest.TestCase):
-    def test_text_messages_use_dify_streaming_variable(self):
-        tool = object.__new__(SkillAgentTool)
-        tool.response_type = ToolInvokeMessage
-        message = tool.create_text_message("progress")
-        self.assertEqual(message.type.value, "variable")
-        self.assertEqual(message.message.variable_name, "text")
-        self.assertEqual(message.message.variable_value, "progress")
-        self.assertTrue(message.message.stream)
-
 class TestShouldEmitUserText(unittest.TestCase):
     """测试 should_emit_user_text 函数"""
 
@@ -153,6 +144,68 @@ class TestShouldEmitUserText(unittest.TestCase):
 
     def test_json_with_prefix(self):
         self.assertTrue(should_emit_user_text('结果是 {"type":"other"}'))
+
+
+class TestCollapsibleOutput(unittest.TestCase):
+    def test_completed_process_has_one_expanded_panel(self):
+        process = _completed_process_markup(["① 确认处理方案。", "② 执行查询。"])
+        self.assertEqual(process.count("<details"), 1)
+        self.assertEqual(process.count("</details>"), 1)
+        self.assertIn("<details open>", process)
+        self.assertNotIn("hidden", process)
+        self.assertNotIn("name=", process)
+        self.assertIn("① 确认处理方案。", process)
+
+    def test_empty_process_is_not_rendered(self):
+        self.assertEqual(_completed_process_markup([]), "")
+
+    def test_followup_heading_variants_are_normalized(self):
+        self.assertEqual(
+            _normalize_user_answer("### 你可能也想问\n- A？"),
+            "",
+        )
+        self.assertEqual(
+            _normalize_user_answer("结果\n\n你可能还想问\n- A？"),
+            "结果",
+        )
+
+    def test_static_followup_suggestions_are_removed(self):
+        normalized = _normalize_user_answer(
+            "结果\n\n### 你可能还想问\n- 查看项目关联的合同/订单/采购单\n- 当前有哪些待办？"
+        )
+        self.assertEqual(normalized, "结果")
+
+    def test_trailing_static_advice_is_removed(self):
+        normalized = _normalize_user_answer(
+            "项目详情已完整展示。\n\n**建议**：如需查看剩余待办，可进一步查询。"
+        )
+        self.assertEqual(normalized, "项目详情已完整展示。")
+
+    def test_internal_requisition_preamble_is_removed(self):
+        canonical = "该项目暂未关联可查询的流程实例，因此暂时无法查看关联业务单据。"
+        raw = f"instanceId 为 `null`。\n技能说明书要求：{canonical}\n\n{canonical}\n\n### 你可能还想问\n- 项目进展？"
+        normalized = _normalize_user_answer(raw)
+        self.assertTrue(normalized.startswith(canonical))
+        self.assertNotIn("instanceId", normalized)
+        self.assertNotIn("`null`", normalized)
+
+    def test_internal_requisition_line_is_removed_with_bold_answer(self):
+        raw = "**该项目暂未关联可查询的流程实例，因此暂时无法查看关联业务单据**。\n\ninstanceId 为 `null`。\n\n你可能还想问\n- 项目进展？"
+        normalized = _normalize_user_answer(raw)
+        self.assertNotIn("instanceId", normalized)
+        self.assertNotIn("`null`", normalized)
+        self.assertNotIn("### 你可能还想问", normalized)
+
+
+class TestSkillVersionMetadata(unittest.TestCase):
+    def test_extracts_declared_semver(self):
+        self.assertEqual(_extract_declared_skill_version("当前版本：`v2.6.1`"), "2.6.1")
+
+    def test_does_not_infer_undeclared_version(self):
+        self.assertIsNone(_extract_declared_skill_version("本技能于 2026-07-15 更新"))
+
+    def test_details_summary_is_preserved(self):
+        self.assertIn("<summary>最终答案</summary>", _open_details_markup("最终答案"))
 
 
 class TestRedactUserVisibleText(unittest.TestCase):

@@ -32,6 +32,15 @@ from utils.tools import _list_dir, _parse_frontmatter, _read_text, _safe_join
 
 # 需要从 JSON 响应中自动移除的大字段（通常是嵌套的节点/详情列表，数据量巨大）
 _COMPRESS_REMOVE_KEYS = frozenset({"nodeList"})
+_SKILL_VERSION_PATTERN = re.compile(
+    r"(?im)^\s*(?:当前)?版本\s*[:：]\s*`?v?(\d+\.\d+\.\d+)`?"
+)
+
+
+def _extract_declared_skill_version(content: str) -> str | None:
+    """Extract a semver explicitly declared in the SKILL.md body."""
+    match = _SKILL_VERSION_PATTERN.search(str(content or ""))
+    return match.group(1) if match else None
 
 
 def _compress_json_value(
@@ -164,6 +173,9 @@ class _AgentRuntime:
             return {"error": "SKILL.md not found", "skill": skill_name}
         content = self._replace_template_vars(_read_text(skill_md, 12000))
         meta = _parse_frontmatter(content)
+        declared_version = _extract_declared_skill_version(content)
+        if declared_version:
+            meta["version"] = declared_version
         self._skill_metadata_cache[skill_name] = {"skill": skill_name, "metadata": meta}
         return {"skill": skill_name, "metadata": meta, "skill_md": content}
 

@@ -55,18 +55,64 @@ from dify_plugin.entities.model.message import (
 )
 from dify_plugin.entities.tool import ToolInvokeMessage
 
+def _open_details_markup(summary: str, *, expanded: bool = False) -> str:
+    """Return a single process panel without an accordion peer."""
+    open_attr = " open" if expanded else ""
+    return f"<details{open_attr}><summary>{summary}</summary>\n\n"
+
+
+def _completed_process_markup(lines: list[str]) -> str:
+    """Render completed compact progress as one expanded panel."""
+    clean = [str(line).strip() for line in lines if str(line).strip()]
+    if not clean:
+        return ""
+    return _open_details_markup("执行过程", expanded=True) + "\n".join(clean) + "\n\n</details>\n\n"
+
+
+def _normalize_user_answer(text: str) -> str:
+    """Normalize small presentation variations produced by weaker models."""
+    answer = str(text or "").strip()
+    heading_variants = (
+        "### 你可能也想问",
+        "### 您可能还想问",
+        "### 您可能也想问",
+        "**你可能还想问：**",
+        "**你可能也想问：**",
+        "**您可能还想问：**",
+        "**您可能也想问：**",
+    )
+    for variant in heading_variants:
+        answer = answer.replace(variant, "### 你可能还想问")
+    answer = re.sub(
+        r"(?m)^[ \t]*你可能还想问[ \t]*[:：]?[ \t]*$",
+        "### 你可能还想问",
+        answer,
+    )
+    no_requisition_message = "该项目暂未关联可查询的流程实例，因此暂时无法查看关联业务单据。"
+    if "该项目暂未关联可查询的流程实例" in answer:
+        return no_requisition_message
+    if no_requisition_message in answer and any(
+        marker in answer for marker in ("instanceId", "`null`", "技能说明书", "技能规则")
+    ):
+        # Weak models may preface the correct business response by repeating
+        # internal fields or instructions. Keep only the last canonical answer
+        # and the useful user-facing details that follow it.
+        answer = answer[answer.rfind(no_requisition_message) :]
+    # Dify's native suggested-questions feature renders clickable prompts after
+    # the answer. Remove model-generated Markdown suggestions to avoid a second,
+    # non-clickable copy in the answer body.
+    if "### 你可能还想问" in answer:
+        answer = answer.split("### 你可能还想问", 1)[0].rstrip()
+    answer = re.sub(
+        r"\n{2,}(?:\*\*)?建议(?:\*\*)?[：:]\s*(?:如需|如果需要|可进一步|可以继续).*$",
+        "",
+        answer,
+        flags=re.DOTALL,
+    ).rstrip()
+    return answer
+
+
 class SkillAgentTool(Tool):
-    def create_text_message(self, text: str) -> ToolInvokeMessage:
-        """Stream every textual update through Dify's built-in text variable.
-
-        Plain TEXT invoke messages are accumulated by the tool execution layer and
-        commonly reach the UI in one batch. Streaming VARIABLE messages are the SDK
-        mechanism that Dify forwards incrementally with the typewriter effect.
-        Keeping this compatibility override means every existing progress/error/final
-        emission becomes genuinely incremental without duplicating the final output.
-        """
-        return self.create_stream_variable_message("text", text)
-
     def _invoke(self, tool_parameters: dict[str, Any]) -> Generator[ToolInvokeMessage]:
         model = tool_parameters.get("model")
         query = tool_parameters.get("query")
@@ -377,9 +423,46 @@ class SkillAgentTool(Tool):
         saved_asset_fingerprints: set[str] = set()
         resume_saved = False
         final_text_already_streamed = False
+        _compact_progress_lines: list[str] = []
+
+        # ── 过程步骤：实时流式展示，并在回答完成后继续保持展开 ──
+        details_opened = False
+        details_closed = False
+        final_details_opened = False
+        final_details_closed = False
+
+        def open_details() -> Generator[ToolInvokeMessage]:
+            nonlocal details_opened
+            if not details_opened:
+                details_opened = True
+                yield self.create_text_message(_open_details_markup("执行过程", expanded=True))
+
+        def close_details() -> Generator[ToolInvokeMessage]:
+            nonlocal details_closed
+            if details_opened and not details_closed:
+                details_closed = True
+                yield self.create_text_message('\n</details>\n\n')
+
+        def open_final_details() -> Generator[ToolInvokeMessage]:
+            """Close the live expanded process panel, then stream the plain answer."""
+            nonlocal details_closed, final_details_opened
+            if final_details_opened:
+                yield from ()
+                return
+            yield from close_details()
+            final_details_opened = True
+
+        def close_final_details() -> Generator[ToolInvokeMessage]:
+            nonlocal final_details_closed
+            if final_details_opened and not final_details_closed:
+                final_details_closed = True
+            # Keep this helper a generator so existing ``yield from`` callers
+            # remain valid while the final answer itself has no closing markup.
+            yield from ()
 
         def stream_text_to_user(text: str, chunk_size: int = 8) -> Generator[ToolInvokeMessage]:
-            s = (text or "").strip()
+            yield from open_final_details()
+            s = _normalize_user_answer(text)
             if not s:
                 return
             step = max(1, int(chunk_size))
@@ -578,7 +661,6 @@ class SkillAgentTool(Tool):
 
         # 工具调用进度消息：verbose 开启时展示细节，关闭时只输出简洁描述
         _tool_step_counter = 0
-        _non_verbose_header_emitted = False
         import time as _time_mod
         _step_start_times: list[float] = []  # 记录每步开始时间，用于计算耗时
 
@@ -599,7 +681,7 @@ class SkillAgentTool(Tool):
             return f"{seconds:.1f}s"
 
         def emit_tool_progress(tool_name: str, detail: str = "", arguments: dict | None = None) -> Generator[ToolInvokeMessage]:
-            nonlocal _tool_step_counter, _non_verbose_header_emitted
+            nonlocal _tool_step_counter
             _tool_step_counter += 1
             _step_start_times.append(_time_mod.time())
             label = _step_label()
@@ -626,10 +708,9 @@ class SkillAgentTool(Tool):
                 # 非详细模式下也带上操作对象，让用户知道具体在做什么
                 detail_short = _shorten_text(_user_safe_detail(detail), 40) if detail else ""
                 desc = f"{phase}" + (f"：{detail_short}" if detail_short else "")
-                if not _non_verbose_header_emitted:
-                    _non_verbose_header_emitted = True
-                    yield self.create_text_message("\n⏳ **正在处理你的任务**\n")
-                yield self.create_text_message(f"  {label} {icon} {desc}\n")
+                line = f"{label} {icon} {desc}。"
+                _compact_progress_lines.append(line)
+                yield self.create_text_message(line + "\n")
                 return
 
             # ── 调试模式：展示分类、工具参数与实际命令，方便定位问题 ──
@@ -637,11 +718,11 @@ class SkillAgentTool(Tool):
                 "get_skill_metadata": ("🔍", f"查阅技能《{detail}》说明书，获取触发条件与执行流程"),
                 "list_skill_files": ("📂", f"浏览技能《{detail}》文件结构，了解可用资源"),
                 "read_skill_file": ("📄", f"读取技能文件：{detail}，提取关键信息"),
-                "run_skill_command": ("⚡", f"执行技能命令：{detail or '技能脚本'}"),
+                "run_skill_command": ("⚙️", f"执行技能命令：{detail or '技能脚本'}"),
                 "write_temp_file": ("📝", f"写入临时文件：{detail}"),
                 "read_temp_file": ("📖", f"读取临时文件：{detail}"),
                 "list_temp_files": ("📋", "查看临时目录中的文件列表"),
-                "run_temp_command": ("⚡", f"执行临时命令：{detail}"),
+                "run_temp_command": ("⚙️", f"执行临时命令：{detail}"),
                 "export_temp_file": ("📦", f"标记交付文件：{detail}，准备发送给用户"),
                 "install_skill": ("🔧", f"安装技能《{detail}》到工具箱"),
                 "list_installed_skills": ("🔧", "查看当前已安装的技能列表"),
@@ -668,6 +749,10 @@ class SkillAgentTool(Tool):
             """
             if not isinstance(result, dict):
                 return
+            # 普通模式中每个工具步骤只展示 emit_tool_progress 的一句话。
+            # 工具结果交给模型汇总到最终回答，避免重复、噪声和技术细节泄露。
+            if not verbose:
+                return
             # 计算本步耗时
             elapsed_str = ""
             if _step_start_times:
@@ -682,10 +767,9 @@ class SkillAgentTool(Tool):
                     detail = result.get("exception") or result.get("stderr") or result.get("_diagnostic")
                     if detail:
                         yield self.create_text_message(f"  ↳ detail: {_shorten_text(redact_user_visible_text(detail), 2000)}\n")
-                else:
-                    yield self.create_text_message(f"  ⚠️ {_friendly_error(tool_name, result)} {elapsed_str}\n")
+                # 非 verbose 模式下不输出错误结果，只保留进度行
                 return
-            # ── 始终展示结果的工具（不受 verbose 限制） ──
+            # ── 调试模式下展示关键结果 ──
             if tool_name == "list_installed_skills":
                 count = result.get("skills_count", 0)
                 skills_list = result.get("skills") or []
@@ -705,26 +789,6 @@ class SkillAgentTool(Tool):
                             yield self.create_text_message(line + "\n")
                     if len(skills_list) > 30:
                         yield self.create_text_message(f"    … 还有 {len(skills_list) - 30} 个技能未展示\n")
-                return
-            if not verbose and tool_name in ("get_skill_metadata", "list_skill_files", "read_skill_file", "read_temp_file", "write_temp_file", "list_temp_files", "run_skill_command", "run_temp_command", "export_temp_file", "install_skill", "uninstall_skill", "update_skill"):
-                _user_result_map = {
-                    "get_skill_metadata": "已确定处理方案，开始执行",
-                    "list_skill_files": "处理资源已准备完成",
-                    "read_skill_file": "已提取完成任务所需规则",
-                    "read_temp_file": "已完成内容校验",
-                    "write_temp_file": "中间内容已生成",
-                    "list_temp_files": "已核对当前生成结果",
-                    "run_skill_command": "核心处理步骤已完成",
-                    "run_temp_command": "内容生成或转换已完成",
-                    "export_temp_file": "最终交付文件已准备完成",
-                    "install_skill": "所需处理能力已配置完成",
-                    "uninstall_skill": "指定处理能力已移除",
-                    "update_skill": "处理能力已更新完成",
-                }
-                yield self.create_text_message(f"  ✔️ {_user_result_map[tool_name]} {elapsed_str}\n")
-                return
-            # ── 以下仅在 debug 模式下展示 ──
-            if not verbose:
                 return
             # 按工具类型展示关键结果（带耗时和更详细的摘要）
             if tool_name == "get_skill_metadata":
@@ -870,7 +934,8 @@ class SkillAgentTool(Tool):
                 nonlocal streamed_any
                 if not text:
                     return
-                tagged = "\n【🤖Skill_Agent】\n" + text.strip() + "\n\n"
+                yield from open_final_details()
+                tagged = _normalize_user_answer(text) + "\n\n"
                 step = max(1, int(typing_chunk))
                 for i in range(0, len(tagged), step):
                     yield self.create_text_message(tagged[i : i + step])
@@ -991,13 +1056,15 @@ class SkillAgentTool(Tool):
                     if t:
                         text_parts.append(t)
                         combined_text_live = "".join(text_parts).strip()
-                        if combined_text_live and not saw_tool_calls:
+                        # 非调试模式先缓冲模型文本：后续若出现工具调用，
+                        # 这些文本只是执行前草稿，不应被当成最终答案流式展示。
+                        if verbose and combined_text_live and not saw_tool_calls:
                             # 计算可安全流式输出的文本边界（JSON/TOOL_RESULT 之前的自然语言部分）
                             safe_len = _safe_stream_boundary(combined_text_live)
                             safe_text = combined_text_live[:safe_len] if safe_len > 0 else combined_text_live
                             if safe_text and should_emit_user_text(safe_text):
                                 if not emitted_prefix:
-                                    yield self.create_text_message("\n【🤖Skill_Agent】\n")
+                                    yield from open_final_details()
                                     emitted_prefix = True
                                 new = safe_text[emitted_len:]
                                 if new:
@@ -1016,14 +1083,18 @@ class SkillAgentTool(Tool):
                 return "", [], {"error": "stream_parse_failed", "exception": str(e)}, chunks_count, streamed_any
 
         try:
+            yield from open_details()  # 开启过程折叠块
             for step_idx in range(max_steps):
                 compact()
                 _dbg(f"step={step_idx+1}/{max_steps} messages={len(messages)}")
                 # 每轮思考前输出简洁的进度提示，让用户感知 Agent 正在工作
-                if step_idx == 0:
-                    yield self.create_text_message("\n🧠 正在思考您的需求...\n")
-                else:
-                    yield self.create_text_message(f"\n🧠 第 {step_idx + 1} 轮思考：根据上一步结果继续分析...\n")
+                # 非调试模式只展示每个工具步骤的一句话，不再额外输出
+                # “正在思考 / 第 N 轮思考”，避免一个步骤占用多行。
+                if verbose:
+                    if step_idx == 0:
+                        yield self.create_text_message("\n💭 正在思考您的需求...\n")
+                    else:
+                        yield self.create_text_message(f"\n💭 第 {step_idx + 1} 轮思考：根据上一步结果继续分析...\n")
                 try:
                     res_text, tool_calls, nontext, chunks, streamed_any = yield from invoke_llm_live(
                         prompt_messages=messages,
@@ -1040,6 +1111,7 @@ class SkillAgentTool(Tool):
                             tail = messages[-8:]
                             messages[:] = [system_msg, *tail]
                         continue
+                    yield from open_final_details()
                     if "NameResolutionError" in msg or "Failed to resolve" in msg:
                         yield self.create_text_message(
                             "❌ LLM 调用失败：无法解析模型服务域名（DNS/网络问题）。\n"
@@ -1381,6 +1453,8 @@ class SkillAgentTool(Tool):
                     assistant_text=assistant_text_for_history,
                 )
                 yield from stream_text_to_user("未生成任何文本或文件输出。")
+
+            yield from close_final_details()
 
             yielded: set[str] = set()
             yielded_fingerprints: set[str] = set()

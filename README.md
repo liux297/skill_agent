@@ -1,7 +1,7 @@
 ## Skill Agent
 
 **Author:** [liux297](https://github.com/liux297) · 297218348@qq.com
-**Version:** 0.2.12
+**Version:** 0.2.30
 **Type:** Tool Plugin
 **License:** Apache-2.0
 **Repository:** https://github.com/liux297/skill_agent
