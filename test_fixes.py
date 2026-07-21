@@ -10,10 +10,13 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
 from utils.skill_agent_constants import ALLOWED_COMMANDS, UNSAFE_COMMANDS
+from utils.skill_agent_exec import _detect_skills_root, _normalize_skill_space
 from utils.skill_agent_runtime import _AgentRuntime
 from utils.skill_agent_runtime import _extract_declared_skill_version
+from utils.skill_agent_storage import _get_history_storage_key
 from utils.tools import _safe_join
 from dify_plugin.entities.tool import ToolInvokeMessage
+from tools.TM import _skill_name_from_command, _skill_target
 from tools.skill_agent import SkillAgentTool, _completed_process_markup, _normalize_user_answer, _open_details_markup
 
 
@@ -424,6 +427,92 @@ class TestSkillInstallSafety(unittest.TestCase):
             runtime = self._runtime(root, session)
             self.assertIn("error", runtime.run_temp_command(command=["python", "-c", "print(1)"]))
             self.assertIn("error", runtime.run_temp_command(command=["python", "-m", "pip"], auto_install=True))
+
+
+class TestSkillSpaces(unittest.TestCase):
+    def _runtime(self, private: Path, session: Path, **kwargs) -> _AgentRuntime:
+        return _AgentRuntime(
+            skills_root=str(private), session_dir=str(session), max_steps=1,
+            memory_turns=1, allowed_commands=set(ALLOWED_COMMANDS), **kwargs,
+        )
+
+    def test_default_space_keeps_legacy_root(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "skills"
+            root.mkdir()
+            self.assertEqual(Path(_detect_skills_root(str(root), "default")), root)
+
+    def test_named_spaces_resolve_to_different_roots(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "skills"
+            root.mkdir()
+            alpha = Path(_detect_skills_root(str(root), "alpha"))
+            beta = Path(_detect_skills_root(str(root), "beta"))
+            self.assertNotEqual(alpha, beta)
+            self.assertEqual(alpha, Path(td) / "skill_spaces" / "alpha")
+            self.assertTrue(alpha.is_dir())
+            self.assertTrue(beta.is_dir())
+
+    def test_invalid_space_is_rejected(self):
+        with self.assertRaises(ValueError):
+            _normalize_skill_space("../other")
+
+    def test_storage_keys_are_scoped_but_default_is_compatible(self):
+        session = {"conversation_id": "conversation-1"}
+        self.assertEqual(_get_history_storage_key(session), "skill:history:conversation-1")
+        self.assertNotEqual(
+            _get_history_storage_key(session, "workflow-a"),
+            _get_history_storage_key(session, "workflow-b"),
+        )
+
+    def test_private_skill_overrides_shared_and_allow_list_filters(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            private, shared, session = base / "private", base / "shared", base / "session"
+            for root in (private, shared, session):
+                root.mkdir()
+            (private / "demo").mkdir(); (private / "demo" / "SKILL.md").write_text("# private", encoding="utf-8")
+            (shared / "demo").mkdir(); (shared / "demo" / "SKILL.md").write_text("# shared", encoding="utf-8")
+            (shared / "hidden").mkdir(); (shared / "hidden" / "SKILL.md").write_text("# hidden", encoding="utf-8")
+            runtime = self._runtime(
+                private, session, shared_skills_root=str(shared),
+                enabled_skills={"demo"}, skill_space="workflow-a",
+            )
+            index = runtime.load_skills_index()
+            self.assertEqual([item["folder"] for item in index["skills"]], ["demo"])
+            metadata = runtime.get_skill_metadata("demo")
+            self.assertEqual(metadata["scope"], "private")
+            self.assertIn("# private", metadata["skill_md"])
+            self.assertEqual(runtime.get_skill_metadata("hidden")["error"], "skill_not_enabled")
+
+    def test_version_requirement_fails_closed(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            private, session = base / "private", base / "session"
+            private.mkdir(); session.mkdir()
+            skill = private / "demo"; skill.mkdir()
+            (skill / "SKILL.md").write_text("当前版本：`v2.6.6`", encoding="utf-8")
+            matching = self._runtime(
+                private, session, enabled_skills={"demo"},
+                expected_skill_version="2.6.6", skill_space="workflow-a",
+            )
+            mismatch = self._runtime(
+                private, session, enabled_skills={"demo"},
+                expected_skill_version="2.7.0", skill_space="workflow-a",
+            )
+            self.assertTrue(matching.validate_skill_selection()["ok"])
+            self.assertEqual(mismatch.validate_skill_selection()["error"], "skill_version_mismatch")
+
+    def test_manager_commands_use_stable_names(self):
+        self.assertEqual(_skill_name_from_command("删除技能 flow-assistant-skill", "删除技能"), "flow-assistant-skill")
+        self.assertEqual(_skill_name_from_command("下载技能：flow-assistant-skill", "下载技能"), "flow-assistant-skill")
+        self.assertEqual(_skill_name_from_command("删除技能 ../other", "删除技能"), "")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            target = root / "flow-assistant-skill"
+            target.mkdir()
+            self.assertEqual(_skill_target(root, "flow-assistant-skill"), target.resolve())
+            self.assertIsNone(_skill_target(root, "missing"))
 
 
 if __name__ == "__main__":

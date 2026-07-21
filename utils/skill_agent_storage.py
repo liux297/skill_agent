@@ -5,10 +5,11 @@ import time
 from typing import Any
 
 from utils.skill_agent_constants import HISTORY_KEY_PREFIX, RESUME_KEY_PREFIX, SESSION_DIR_KEY_PREFIX
+from utils.skill_agent_exec import DEFAULT_SKILL_SPACE, _normalize_skill_space
 from utils.tools import _safe_get
 
 
-def _get_session_storage_id(session: Any) -> str:
+def _get_session_storage_id(session: Any, skill_space: object | None = None) -> str:
     candidates = [
         _safe_get(session, "conversation_id"),
         _safe_get(session, "chat_id"),
@@ -19,20 +20,26 @@ def _get_session_storage_id(session: Any) -> str:
     ]
     for c in candidates:
         if isinstance(c, str) and c.strip():
-            return c.strip()
-    return "global"
+            session_id = c.strip()
+            break
+    else:
+        session_id = "global"
+    space = _normalize_skill_space(skill_space)
+    if space == DEFAULT_SKILL_SPACE:
+        return session_id
+    return f"space:{space}:{session_id}"
 
 
-def _get_resume_storage_key(session: Any) -> str:
-    return RESUME_KEY_PREFIX + _get_session_storage_id(session)
+def _get_resume_storage_key(session: Any, skill_space: object | None = None) -> str:
+    return RESUME_KEY_PREFIX + _get_session_storage_id(session, skill_space)
 
 
-def _get_history_storage_key(session: Any) -> str:
-    return HISTORY_KEY_PREFIX + _get_session_storage_id(session)
+def _get_history_storage_key(session: Any, skill_space: object | None = None) -> str:
+    return HISTORY_KEY_PREFIX + _get_session_storage_id(session, skill_space)
 
 
-def _get_session_dir_storage_key(session: Any) -> str:
-    return SESSION_DIR_KEY_PREFIX + _get_session_storage_id(session)
+def _get_session_dir_storage_key(session: Any, skill_space: object | None = None) -> str:
+    return SESSION_DIR_KEY_PREFIX + _get_session_storage_id(session, skill_space)
 
 
 def _storage_get_text(storage: Any, key: str) -> str:

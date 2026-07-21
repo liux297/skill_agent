@@ -1,14 +1,14 @@
 ## Skill Agent
 
 **Author:** [liux297](https://github.com/liux297) · 297218348@qq.com
-**Version:** 0.2.30
+**Version:** 0.2.31
 **Type:** Tool Plugin
 **License:** Apache-2.0
 **Repository:** https://github.com/liux297/skill_agent
 
 ### Overview
 
-Skill Agent is a universal Agent plugin built on the "Skill Progressive Disclosure" pattern, inspired by OpenClaw and Hermes agent architecture designs. It treats the local `skills/` directory as a "toolbox", allowing the LLM to progressively read skill instructions, files, and execute scripts on demand, ultimately generating text or file deliverables.
+Skill Agent is a universal Agent plugin built on the "Skill Progressive Disclosure" pattern, inspired by OpenClaw and Hermes agent architecture designs. Each workflow can select an isolated Skill Space as its toolbox, allowing the LLM to progressively read skill instructions, files, and execute scripts on demand, ultimately generating text or file deliverables.
 
 ### Key Features
 
@@ -22,6 +22,8 @@ Skill Agent is a universal Agent plugin built on the "Skill Progressive Disclosu
 - **Verbose mode toggle**: Debug-level detailed output vs user-facing concise output
 - **Custom system prompt**: Override or extend the default Agent behavior instructions
 - **Step-by-step progress**: Each tool execution step displays icon, step number, operation description, elapsed time, and result summary
+- **Workflow-level Skill Spaces**: Different workflows can select isolated libraries, optional shared read-only skills, an allow-list, and a fail-closed expected version
+- **Stable name-based management**: List, delete and download skills by folder name instead of unstable numeric positions
 
 ### Use Cases
 
@@ -34,7 +36,7 @@ Skill Agent is a universal Agent plugin built on the "Skill Progressive Disclosu
 
 This plugin provides two tools:
 
-**Skill Manager**: Manage skill directories — view, add, delete, and download skills.
+**Skill Manager**: Manage one selected Skill Space — view/add skills and delete/download them by stable folder name.
 
 **Skill Agent**: Universal agent for executing installed skills.
 
@@ -45,6 +47,10 @@ This plugin provides two tools:
 | `query` | string | Yes | - | Your question or task |
 | `model` | model-selector | Yes | - | LLM to run this tool |
 | `files` | files | No | - | Uploaded files for the Agent to process |
+| `skill_space` | string | Yes | `default` | Isolated skill library selected by this workflow |
+| `enabled_skills` | string | No | - | Comma-separated allow-list of skill folder names; empty means all |
+| `skill_version` | string | No | - | Expected version for exactly one enabled skill; mismatch stops execution |
+| `include_shared_skills` | boolean | Yes | false | Include the `shared` space as read-only fallback |
 | `max_steps` | number | Yes | 15 | Maximum execution rounds per call |
 | `memory_turns` | number | Yes | 12 | Context turns to retain per call |
 | `history_turns` | number | Yes | 3 | Cross-turn history injection rounds |
@@ -58,8 +64,10 @@ This plugin provides two tools:
 1. Install this plugin from the marketplace (or upload the `.difypkg` file)
 2. For self-hosted users, set `Files_url` in Dify's `.env` to your Dify address
 3. Arrange your workflow with the Skill Agent tool node
-4. Manage skills (upload skill packages as zip files)
+4. Set the same `skill_space` on Skill Manager and Skill Agent, then upload skill packages as zip files
 5. Interact with Skill Agent
+
+Skill Manager commands use stable names: `查看技能`, `新增技能`, `删除技能 <名称>`, and `下载技能 <名称>`.
 
 ### Skill Standard
 

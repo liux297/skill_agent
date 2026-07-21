@@ -1,14 +1,14 @@
 ## Skill Agent
 
 **作者：** [liux297](https://github.com/liux297) · 297218348@qq.com
-**版本：** 0.2.12
+**版本：** 0.2.31
 **类型：** 工具插件
 **许可证：** Apache-2.0
 **项目地址：** https://github.com/liux297/skill_agent
 
-### v0.2.9 新增功能
+### v0.2.31 新增功能
 
-Skill Agent 是基于 Skill 渐进式披露模式构建的通用型 Agent 插件，参考/借鉴 OpenClaw 与 Hermes 的 Agent 架构设计。v0.2.9 版本在原有基础上实现了以下增强：
+Skill Agent 是基于 Skill 渐进式披露模式构建的通用型 Agent 插件，参考/借鉴 OpenClaw 与 Hermes 的 Agent 架构设计。v0.2.31 在原有能力上增加工作流级 Skill Space、技能范围限制、版本校验、公共只读技能与按名称管理。
 
 - **双协议智能切换**：自动检测模型 FC 能力，兼容 Function Calling 和 JSON 协议两种模式
 - **渐进式披露优化**：先用技能索引判断，再读取 SKILL.md，再按需读文件/执行命令，避免冗余操作
@@ -22,7 +22,7 @@ Skill Agent 是基于 Skill 渐进式披露模式构建的通用型 Agent 插件
 
 ### 简介
 
-Skill Agent 是一个基于 "Skill 渐进式披露（Progressive Disclosure）" 设计的通用型工具插件，参考/借鉴 OpenClaw 与 Hermes 的 Agent 架构设计。它把本地 `skills/` 目录当作"工具箱"，让大模型在需要时逐步读取技能说明、再按需读取文件/执行脚本，最终生成文本或文件交付。
+Skill Agent 是一个基于 "Skill 渐进式披露（Progressive Disclosure）" 设计的通用型工具插件，参考/借鉴 OpenClaw 与 Hermes 的 Agent 架构设计。每个工作流可以选择独立的 Skill Space 作为“工具箱”，让大模型在需要时逐步读取技能说明、再按需读取文件/执行脚本，最终生成文本或文件交付。
 
 ### 适用场景
 
@@ -39,12 +39,14 @@ Skill Agent 是一个基于 "Skill 渐进式披露（Progressive Disclosure）" 
 - 可控记忆：Agent 可设定记忆长度，可执行轮次深度等
 - 自定义变量：通过 `${var}` 模板和环境变量向技能注入运行时上下文
 - 详细模式开关：调试时展示完整细节，面向用户时隐藏技术细节
+- 工作流级 Skill Space：不同工作流可选择独立技能库，也可按需加载公共只读技能
+- 稳定名称管理：按技能目录名称删除和下载，不再依赖会变化的序号
 
 ### 工具参数
 
 本插件共有两个工具：
 
-**"技能管理"**：用于管理技能目录，可查看技能、新增技能、删除技能、下载技能。
+**"技能管理"**：管理指定 Skill Space，可查看、新增技能，并按稳定名称删除或下载技能。
 ![alt text](../_assets/image-0.png)
 
 **"agent_skill"**：通用智能体，可用于执行已存入的技能。
@@ -57,6 +59,10 @@ Skill Agent 是一个基于 "Skill 渐进式披露（Progressive Disclosure）" 
 | `query` | string | 是 | - | 你想问的问题或任务 |
 | `model` | model-selector | 是 | - | 运行本工具的大模型 |
 | `files` | files | 否 | - | 供 Agent 处理的上传文件 |
+| `skill_space` | string | 是 | `default` | 当前工作流选择的独立技能库名称 |
+| `enabled_skills` | string | 否 | - | 允许使用的技能目录名，逗号分隔；留空表示全部 |
+| `skill_version` | string | 否 | - | 单个启用技能的固定版本，版本不匹配时停止执行 |
+| `include_shared_skills` | boolean | 是 | false | 是否加载 `shared` 公共只读空间 |
 | `max_steps` | number | 是 | 15 | 单次调用内最大执行轮数 |
 | `memory_turns` | number | 是 | 12 | 单次调用内保留的上下文轮数 |
 | `history_turns` | number | 是 | 3 | 跨回合注入的历史对话轮数 |
@@ -78,6 +84,8 @@ Skill Agent 是一个基于 "Skill 渐进式披露（Progressive Disclosure）" 
 **第四步**：管理技能（以 zip 压缩包形式上传技能包）
 ![alt text](../_assets/image-3.png)
 
+技能管理与 Skill Agent 节点应配置相同的 `skill_space`。管理命令使用稳定名称：`查看技能`、`新增技能`、`删除技能 <名称>`、`下载技能 <名称>`。
+
 **第五步**：与 Skill_Agent 交互
 ![alt text](../_assets/image-4.png)
 ![alt text](../_assets/image-5.png)
@@ -90,7 +98,14 @@ Skill Agent 是一个基于 "Skill 渐进式披露（Progressive Disclosure）" 
 
 ### 更新历史
 
-**v0.2.9（当前版本）：**
+**v0.2.31（当前版本）：**
+1. 工作流通过 `skill_space` 选择互相隔离的技能库
+2. 支持 `enabled_skills` 技能白名单和单技能版本校验
+3. 可选择加载 `shared` 公共只读技能，同名时私有空间优先
+4. 技能管理按稳定名称删除、下载，不再依赖序号
+5. 对话存储键和临时目录按 Skill Space 隔离
+
+**v0.2.9：**
 1. 双协议智能切换：自动检测模型 FC 能力，兼容 Function Calling 和 JSON 协议两种模式
 2. 渐进式披露优化：避免冗余的文件列表操作，提高执行效率
 3. 上下文智能压缩：基于 token 估算的上下文管理与自动恢复机制

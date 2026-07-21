@@ -104,13 +104,25 @@ class _AgentRuntime:
         max_stdout_chars: int = 30000,
         allowed_commands: set[str],  # 由调用方传入（yaml 默认值或用户自定义）
         allow_unsafe_commands: bool = False,
+        skill_space: str = "default",
+        shared_skills_root: str | None = None,
+        enabled_skills: set[str] | None = None,
+        expected_skill_version: str | None = None,
     ) -> None:
         self.skills_root = skills_root
+        self.shared_skills_root = shared_skills_root
         self.session_dir = session_dir
         self.max_steps = max_steps
         self.memory_turns = memory_turns
         self.custom_variables = custom_variables or {}
         self.max_stdout_chars = max_stdout_chars
+        self.skill_space = skill_space
+        self.enabled_skills = (
+            {str(name).strip() for name in enabled_skills if str(name).strip()}
+            if enabled_skills
+            else None
+        )
+        self.expected_skill_version = str(expected_skill_version or "").strip().lstrip("vV") or None
         # The caller may narrow the normal allow-list, but cannot enable shells,
         # installers or network clients without an explicit opt-in.
         requested = {str(x).lower() for x in allowed_commands}
@@ -118,6 +130,76 @@ class _AgentRuntime:
         self.allowed_commands = requested & (ALLOWED_COMMANDS | (UNSAFE_COMMANDS if allow_unsafe_commands else set()))
         self._skill_metadata_cache: dict[str, dict[str, Any]] = {}
         self._skill_files_listed: set[str] = set()
+
+    def _skill_is_enabled(self, skill_name: str) -> bool:
+        return self.enabled_skills is None or str(skill_name or "").strip() in self.enabled_skills
+
+    def _skill_roots(self) -> list[tuple[str, str]]:
+        roots: list[tuple[str, str]] = []
+        if self.skills_root:
+            roots.append((self.skills_root, "private"))
+        if self.shared_skills_root:
+            shared_abs = os.path.abspath(self.shared_skills_root)
+            if not any(os.path.abspath(root) == shared_abs for root, _ in roots):
+                roots.append((self.shared_skills_root, "shared"))
+        return roots
+
+    def _resolve_skill(self, skill_name: str) -> tuple[str | None, str | None, dict[str, Any] | None]:
+        name = str(skill_name or "").strip()
+        if not name:
+            return None, None, {"error": "skill_name 不能为空", "skill_name": skill_name}
+        if not self._skill_is_enabled(name):
+            return None, None, {
+                "error": "skill_not_enabled",
+                "skill": name,
+                "detail": "当前工作流未启用该技能。",
+            }
+        for root, scope in self._skill_roots():
+            try:
+                path = _safe_join(root, name)
+            except Exception as exc:
+                return None, None, {"error": "invalid skill_name", "skill": name, "exception": str(exc)}
+            if os.path.isdir(path) and os.path.isfile(os.path.join(path, "SKILL.md")):
+                return path, scope, None
+        return None, None, {"error": "skill_not_found", "skill": name}
+
+    def validate_skill_selection(self) -> dict[str, Any]:
+        """Fail closed when a workflow selects missing skills or a wrong version."""
+        if self.enabled_skills:
+            missing = []
+            for name in sorted(self.enabled_skills):
+                _, _, error = self._resolve_skill(name)
+                if error:
+                    missing.append(name)
+            if missing:
+                return {
+                    "error": "configured_skills_not_found",
+                    "skill_space": self.skill_space,
+                    "missing_skills": missing,
+                }
+        if self.expected_skill_version:
+            if not self.enabled_skills or len(self.enabled_skills) != 1:
+                return {
+                    "error": "skill_version_requires_one_enabled_skill",
+                    "skill_space": self.skill_space,
+                    "detail": "配置 skill_version 时，enabled_skills 必须且只能填写一个技能名称。",
+                }
+            name = next(iter(self.enabled_skills))
+            path, _, error = self._resolve_skill(name)
+            if error or not path:
+                return error or {"error": "skill_not_found", "skill": name}
+            content = _read_text(os.path.join(path, "SKILL.md"), 12000)
+            metadata = _parse_frontmatter(content)
+            actual = str(metadata.get("version") or _extract_declared_skill_version(content) or "").strip().lstrip("vV")
+            if actual != self.expected_skill_version:
+                return {
+                    "error": "skill_version_mismatch",
+                    "skill_space": self.skill_space,
+                    "skill": name,
+                    "expected_version": self.expected_skill_version,
+                    "actual_version": actual or None,
+                }
+        return {"ok": True}
 
     def _replace_template_vars(self, text: str) -> str:
         """将文本中 ${xxx} 格式的占位符替换为 custom_variables 中对应字段的值。"""
@@ -144,30 +226,39 @@ class _AgentRuntime:
         return bool(isinstance(cached, dict) and cached.get("skill") == skill_name)
 
     def load_skills_index(self) -> dict[str, Any]:
-        if not self.skills_root:
-            return {"root": None, "skills": []}
+        if not self._skill_roots():
+            return {"root": None, "skill_space": self.skill_space, "skills": []}
         skills: list[dict[str, Any]] = []
-        for folder in sorted(os.listdir(self.skills_root)):
-            path = os.path.join(self.skills_root, folder)
-            if not os.path.isdir(path):
-                continue
-            skill_md = os.path.join(path, "SKILL.md")
-            meta: dict[str, str] = {}
-            if os.path.isfile(skill_md):
-                meta = _parse_frontmatter(self._replace_template_vars(_read_text(skill_md, 4000)))
-            skills.append(
-                {
-                    "name": meta.get("name") or folder,
-                    "folder": folder,
-                    "description": self._replace_template_vars(meta.get("description") or ""),
-                }
-            )
-        return {"root": self.skills_root, "skills": skills}
+        seen: set[str] = set()
+        for root, scope in self._skill_roots():
+            for folder in sorted(os.listdir(root)):
+                if folder.startswith(".") or folder in seen or not self._skill_is_enabled(folder):
+                    continue
+                path = os.path.join(root, folder)
+                if not os.path.isdir(path):
+                    continue
+                skill_md = os.path.join(path, "SKILL.md")
+                if not os.path.isfile(skill_md):
+                    continue
+                content = self._replace_template_vars(_read_text(skill_md, 4000))
+                meta = _parse_frontmatter(content)
+                version = str(meta.get("version") or _extract_declared_skill_version(content) or "").strip().lstrip("vV")
+                skills.append(
+                    {
+                        "name": meta.get("name") or folder,
+                        "folder": folder,
+                        "description": self._replace_template_vars(meta.get("description") or ""),
+                        "version": version or None,
+                        "scope": scope,
+                    }
+                )
+                seen.add(folder)
+        return {"root": self.skills_root, "skill_space": self.skill_space, "skills": skills}
 
     def get_skill_metadata(self, skill_name: str) -> dict[str, Any]:
-        if not self.skills_root:
-            return {"error": "skills_root not found"}
-        path = _safe_join(self.skills_root, skill_name)
+        path, scope, error = self._resolve_skill(skill_name)
+        if error or not path:
+            return error or {"error": "skill_not_found", "skill": skill_name}
         skill_md = os.path.join(path, "SKILL.md")
         if not os.path.isfile(skill_md):
             return {"error": "SKILL.md not found", "skill": skill_name}
@@ -177,26 +268,26 @@ class _AgentRuntime:
         if declared_version:
             meta["version"] = declared_version
         self._skill_metadata_cache[skill_name] = {"skill": skill_name, "metadata": meta}
-        return {"skill": skill_name, "metadata": meta, "skill_md": content}
+        return {"skill": skill_name, "scope": scope, "metadata": meta, "skill_md": content}
 
     def list_skill_files(self, skill_name: str, max_depth: int = 2) -> dict[str, Any]:
-        if not self.skills_root:
-            return {"error": "skills_root not found"}
-        skill_path = _safe_join(self.skills_root, skill_name)
+        skill_path, scope, error = self._resolve_skill(skill_name)
+        if error or not skill_path:
+            return error or {"error": "skill_not_found", "skill": skill_name}
         self._skill_files_listed.add(skill_name)
-        return {"skill": skill_name, "entries": _list_dir(skill_path, max_depth=max_depth)}
+        return {"skill": skill_name, "scope": scope, "entries": _list_dir(skill_path, max_depth=max_depth)}
 
     def has_listed_skill_files(self, skill_name: str) -> bool:
         return str(skill_name or "").strip() in self._skill_files_listed
 
     def read_skill_file(self, skill_name: str, relative_path: str, max_chars: int = 12000) -> dict[str, Any]:
-        if not self.skills_root:
-            return {"error": "skills_root not found"}
-        skill_path = _safe_join(self.skills_root, skill_name)
+        skill_path, scope, error = self._resolve_skill(skill_name)
+        if error or not skill_path:
+            return error or {"error": "skill_not_found", "skill": skill_name}
         file_path = _safe_join(skill_path, relative_path)
         if not os.path.isfile(file_path):
             return {"error": "file not found", "path": relative_path}
-        return {"path": file_path, "content": self._replace_template_vars(_read_text(file_path, max_chars))}
+        return {"path": file_path, "scope": scope, "content": self._replace_template_vars(_read_text(file_path, max_chars))}
 
     def write_temp_file(self, relative_path: str, content: str) -> dict[str, Any]:
         os.makedirs(self.session_dir, exist_ok=True)
@@ -242,6 +333,10 @@ class _AgentRuntime:
     def get_session_context(self) -> dict[str, Any]:
         return {
             "skills_root": self.skills_root,
+            "shared_skills_root": self.shared_skills_root,
+            "skill_space": self.skill_space,
+            "enabled_skills": sorted(self.enabled_skills) if self.enabled_skills else [],
+            "expected_skill_version": self.expected_skill_version,
             "session_dir": self.session_dir,
             "custom_variables": self.custom_variables,
         }
@@ -313,11 +408,11 @@ class _AgentRuntime:
         cwd_relative: str | None = None,
         auto_install: bool = False,
     ) -> dict[str, Any]:
-        if not self.skills_root:
-            return {"error": "skills_root not found"}
         if not command:
             return {"error": "command must be a non-empty list"}
-        skill_path = _safe_join(self.skills_root, skill_name)
+        skill_path, _, error = self._resolve_skill(skill_name)
+        if error or not skill_path:
+            return error or {"error": "skill_not_found", "skill": skill_name}
         exe = command[0]
         if not self.allow_unsafe_commands and auto_install:
             return {"error": "auto_install requires allow_unsafe_commands=true"}
@@ -409,6 +504,8 @@ class _AgentRuntime:
         safe_name = skill_name.replace("/", "").replace("\\", "").replace("..", "").strip()
         if not safe_name:
             return {"error": "skill_name 不能为空或包含非法字符", "skill_name": skill_name}
+        if not self._skill_is_enabled(safe_name):
+            return {"error": "skill_not_enabled", "skill": safe_name, "detail": "当前工作流未启用该技能。"}
         # 定位源文件（在 session_dir 下）
         src = _safe_join(self.session_dir, source_path)
         if not os.path.exists(src):
@@ -474,28 +571,34 @@ class _AgentRuntime:
         }
 
     def list_installed_skills(self) -> dict[str, Any]:
-        """列出 skills_root 下所有已安装的技能。"""
-        if not self.skills_root:
+        """列出当前空间可见的私有技能和可选公共只读技能。"""
+        if not self._skill_roots():
             return {"error": "skills_root 未配置", "skills": []}
         skills: list[dict[str, Any]] = []
-        for folder in sorted(os.listdir(self.skills_root)):
-            path = os.path.join(self.skills_root, folder)
-            if not os.path.isdir(path):
-                continue
-            skill_md = os.path.join(path, "SKILL.md")
-            has_md = os.path.isfile(skill_md)
-            meta: dict[str, str] = {}
-            if has_md:
-                from utils.tools import _parse_frontmatter, _read_text
-                meta = _parse_frontmatter(_read_text(skill_md, 4000))
-            skills.append({
-                "name": meta.get("name") or folder,
-                "folder": folder,
-                "description": self._replace_template_vars(meta.get("description") or ""),
-                "has_skill_md": has_md,
-            })
+        seen: set[str] = set()
+        for root, scope in self._skill_roots():
+            for folder in sorted(os.listdir(root)):
+                if folder.startswith(".") or folder in seen or not self._skill_is_enabled(folder):
+                    continue
+                path = os.path.join(root, folder)
+                if not os.path.isdir(path):
+                    continue
+                skill_md = os.path.join(path, "SKILL.md")
+                has_md = os.path.isfile(skill_md)
+                meta: dict[str, str] = {}
+                if has_md:
+                    meta = _parse_frontmatter(_read_text(skill_md, 4000))
+                skills.append({
+                    "name": meta.get("name") or folder,
+                    "folder": folder,
+                    "description": self._replace_template_vars(meta.get("description") or ""),
+                    "has_skill_md": has_md,
+                    "scope": scope,
+                })
+                seen.add(folder)
         return {
             "root": self.skills_root,
+            "skill_space": self.skill_space,
             "skills_count": len(skills),
             "skills": skills,
         }
@@ -507,6 +610,8 @@ class _AgentRuntime:
         safe_name = skill_name.replace("/", "").replace("\\", "").replace("..", "").strip()
         if not safe_name:
             return {"error": "skill_name 不能为空或包含非法字符", "skill_name": skill_name}
+        if not self._skill_is_enabled(safe_name):
+            return {"error": "skill_not_enabled", "skill": safe_name, "detail": "当前工作流未启用该技能。"}
         target = _safe_join(self.skills_root, safe_name)
         if not os.path.isdir(target):
             return {"error": "技能不存在", "skill_name": safe_name, "skills_root": self.skills_root}
@@ -525,6 +630,8 @@ class _AgentRuntime:
         safe_name = skill_name.replace("/", "").replace("\\", "").replace("..", "").strip()
         if not safe_name:
             return {"error": "skill_name 不能为空或包含非法字符", "skill_name": skill_name}
+        if not self._skill_is_enabled(safe_name):
+            return {"error": "skill_not_enabled", "skill": safe_name, "detail": "当前工作流未启用该技能。"}
         target = _safe_join(self.skills_root, safe_name)
         # 检查旧版本是否存在
         if not os.path.isdir(target):

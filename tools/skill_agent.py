@@ -30,7 +30,13 @@ from utils.tools import (
 
 from utils.skill_agent_constants import ALLOWED_COMMANDS, HISTORY_TRANSCRIPT_MAX_CHARS, MAX_UPLOAD_BYTES
 from utils.skill_agent_debug import _dbg, _model_brief
-from utils.skill_agent_exec import _cleanup_old_temp_sessions, _detect_skills_root
+from utils.skill_agent_exec import (
+    SHARED_SKILL_SPACE,
+    _cleanup_old_temp_sessions,
+    _detect_skills_root,
+    _detect_temp_root,
+    _normalize_skill_space,
+)
 from utils.skill_agent_runtime import _AgentRuntime
 from utils.skill_agent_schemas import TOOL_SCHEMAS, _coerce_command_to_list, _tool_call_retry_prompt, _validate_tool_arguments
 from utils.skill_agent_storage import (
@@ -132,7 +138,23 @@ class SkillAgentTool(Tool):
             allowed_commands = {cmd.strip().lower() for cmd in allowed_commands_raw.split(",") if cmd.strip()}
         allow_unsafe_commands = tool_parameters.get("allow_unsafe_commands") in (True, "true", "True", 1, "1")
 
-        skills_root = _detect_skills_root(tool_parameters.get("skills_root"))
+        try:
+            skill_space = _normalize_skill_space(tool_parameters.get("skill_space"))
+        except ValueError as exc:
+            yield self.create_text_message(f"❌Skill Space 配置无效：{exc}\n")
+            return
+        skills_root = _detect_skills_root(tool_parameters.get("skills_root"), skill_space)
+        enabled_skills_raw = str(tool_parameters.get("enabled_skills") or "").strip()
+        enabled_skills = {
+            name.strip()
+            for name in re.split(r"[,，\n]", enabled_skills_raw)
+            if name.strip()
+        } or None
+        expected_skill_version = str(tool_parameters.get("skill_version") or "").strip() or None
+        include_shared_skills = tool_parameters.get("include_shared_skills") in (True, "true", "True", 1, "1")
+        shared_skills_root = None
+        if include_shared_skills and skill_space != SHARED_SKILL_SPACE:
+            shared_skills_root = _detect_skills_root(None, SHARED_SKILL_SPACE)
         storage = self.session.storage
         custom_variables_raw = tool_parameters.get("custom_variables") or ""
         custom_variables: dict[str, str] = {}
@@ -149,16 +171,14 @@ class SkillAgentTool(Tool):
             return
         user_input = str(query)
 
-        resume_key = _get_resume_storage_key(self.session)
-        history_key = _get_history_storage_key(self.session)
-        session_dir_key = _get_session_dir_storage_key(self.session)
+        resume_key = _get_resume_storage_key(self.session, skill_space)
+        history_key = _get_history_storage_key(self.session, skill_space)
+        session_dir_key = _get_session_dir_storage_key(self.session, skill_space)
         resume_state = _storage_get_json(storage, resume_key)
         resume_pending = bool(resume_state.get("pending"))
         is_resuming = False
 
-        plugin_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        temp_root = os.path.join(plugin_root, "temp")
-        os.makedirs(temp_root, exist_ok=True)
+        temp_root = _detect_temp_root(skill_space)
         persisted_session_dir = _storage_get_text(storage, session_dir_key).strip()
         if persisted_session_dir and os.path.isdir(persisted_session_dir):
             session_dir = persisted_session_dir
@@ -260,6 +280,7 @@ class SkillAgentTool(Tool):
 
         runtime = _AgentRuntime(
             skills_root=skills_root,
+            shared_skills_root=shared_skills_root,
             session_dir=session_dir,
             max_steps=max_steps,
             memory_turns=memory_turns,
@@ -267,7 +288,27 @@ class SkillAgentTool(Tool):
             max_stdout_chars=max_stdout_chars,
             allowed_commands=allowed_commands,
             allow_unsafe_commands=allow_unsafe_commands,
+            skill_space=skill_space,
+            enabled_skills=enabled_skills,
+            expected_skill_version=expected_skill_version,
         )
+
+        selection_validation = runtime.validate_skill_selection()
+        if selection_validation.get("error"):
+            error_code = selection_validation.get("error")
+            if error_code == "configured_skills_not_found":
+                missing = "、".join(selection_validation.get("missing_skills") or [])
+                message = f"Skill Space《{skill_space}》中找不到工作流配置的技能：{missing}。"
+            elif error_code == "skill_version_mismatch":
+                message = (
+                    f"技能《{selection_validation.get('skill')}》版本不匹配："
+                    f"工作流要求 {selection_validation.get('expected_version')}，"
+                    f"当前空间为 {selection_validation.get('actual_version') or '未声明版本'}。"
+                )
+            else:
+                message = str(selection_validation.get("detail") or "工作流的技能选择配置无效。")
+            yield self.create_text_message(f"❌{message}\n")
+            return
 
         history_messages: list[Any] = []
         if history_turns > 0:
@@ -309,7 +350,7 @@ class SkillAgentTool(Tool):
         _dbg(
             "start "
             + _model_brief(model)
-            + f" session_dir={session_dir} skills_root={skills_root!s} skills_count={skills_count} "
+            + f" skill_space={skill_space} session_dir={session_dir} skills_root={skills_root!s} skills_count={skills_count} "
             + f"query_len={len(query)}"
         )
         system_content = (
@@ -318,6 +359,13 @@ class SkillAgentTool(Tool):
             + "\n[会话路径]\n"
             + f"- session_dir: {session_dir}\n"
             + f"- skills_root: {skills_root}\n"
+            + f"- skill_space: {skill_space}\n"
+            + (
+                f"- enabled_skills: {', '.join(sorted(enabled_skills))}\n"
+                if enabled_skills else "- enabled_skills: 当前空间全部技能\n"
+            )
+            + (f"- expected_skill_version: {expected_skill_version}\n" if expected_skill_version else "")
+            + ("- shared_skills: 已启用公共只读技能空间\n" if shared_skills_root else "")
             + (
                 "\n[自定义变量]\n"
                 + "以下变量由调用方注入，技能可通过 get_session_context 获取，在执行命令时可以作为参数引用：\n"
@@ -473,8 +521,8 @@ class SkillAgentTool(Tool):
             s = str(text or "")
             if not s:
                 return s
-            # 只脱敏 session_dir 和 skills_root 这两个已知敏感路径
-            for p in [session_dir, skills_root]:
+            # 只脱敏当前调用已知的会话与技能目录
+            for p in [session_dir, skills_root, shared_skills_root]:
                 if p and isinstance(p, str):
                     s = s.replace(p, "<REDACTED_PATH>")
                     s = s.replace(p.replace("\\", "/"), "<REDACTED_PATH>")

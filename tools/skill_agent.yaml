@@ -46,6 +46,72 @@ parameters:
     llm_description: "Upload file(s) for the agent to process."
     form: llm
 
+  - name: skill_space
+    type: string
+    required: true
+    default: "default"
+    label:
+      en_US: Skill Space
+      zh_Hans: Skill 空间
+      pt_BR: Espaço de Skills
+      ja_JP: Skill スペース
+    human_description:
+      en_US: "Isolated skill library selected by this workflow. Workflows using different names do not share skill changes."
+      zh_Hans: "当前工作流使用的独立技能库名称；不同名称的工作流互不影响。默认 default 兼容原有技能目录。"
+      pt_BR: "Biblioteca de skills isolada usada por este workflow."
+      ja_JP: "このワークフローが使用する分離された Skill ライブラリ。"
+    llm_description: "Workflow-level isolated skill library name."
+    form: form
+
+  - name: enabled_skills
+    type: string
+    required: false
+    label:
+      en_US: Enabled Skills
+      zh_Hans: 启用的 Skills
+      pt_BR: Skills habilitadas
+      ja_JP: 有効な Skills
+    human_description:
+      en_US: "Optional comma-separated skill folder names. Leave empty to expose every skill in the selected space."
+      zh_Hans: "可选，填写逗号分隔的技能目录名称；留空表示使用当前空间的全部技能。"
+      pt_BR: "Nomes de skills separados por vírgula; vazio habilita todas."
+      ja_JP: "カンマ区切りの Skill フォルダー名。空欄ではすべて有効。"
+    llm_description: "Optional allow-list of skill folder names."
+    form: form
+
+  - name: skill_version
+    type: string
+    required: false
+    label:
+      en_US: Required Skill Version
+      zh_Hans: 固定 Skill 版本
+      pt_BR: Versão obrigatória da Skill
+      ja_JP: 必須 Skill バージョン
+    human_description:
+      en_US: "Optional expected version. Requires exactly one enabled skill and stops execution if its declared version differs."
+      zh_Hans: "可选版本校验；填写后必须只启用一个 Skill，实际版本不一致时停止执行，避免线上流程静默漂移。"
+      pt_BR: "Versão esperada opcional; interrompe em caso de incompatibilidade."
+      ja_JP: "任意の期待バージョン。不一致の場合は実行を停止します。"
+    llm_description: "Optional fail-closed version requirement for one enabled skill."
+    form: form
+
+  - name: include_shared_skills
+    type: boolean
+    required: true
+    default: false
+    label:
+      en_US: Include Shared Skills
+      zh_Hans: 加载公共 Skills
+      pt_BR: Incluir Skills compartilhadas
+      ja_JP: 共有 Skills を読み込む
+    human_description:
+      en_US: "Also load the shared skill space as read-only fallback; private skills with the same folder name take precedence."
+      zh_Hans: "同时加载 shared 公共空间作为只读补充；同名时当前工作流空间优先。"
+      pt_BR: "Também carrega o espaço compartilhado como somente leitura."
+      ja_JP: "共有スペースを読み取り専用の補助として読み込みます。"
+    llm_description: "Include read-only shared skills after private workflow skills."
+    form: form
+
   - name: model
     type: model-selector
     scope: llm

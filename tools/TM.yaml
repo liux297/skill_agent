@@ -24,11 +24,27 @@ parameters:
       ja_JP: コマンド
     human_description:
       en_US: "supported commands: add, delete, list, download"
-      zh_Hans: "支持：查看技能、新增技能、删除技能N、下载技能N"
+      zh_Hans: "支持：查看技能、新增技能、删除技能 <名称>、下载技能 <名称>"
       pt_BR: "Gerenciar pacotes de habilidades locais (adicionar/remover/visualizar/baixar)."
       ja_JP: "ローカルのスキルパッケージを管理（追加/削除/表示/ダウンロード）"
     llm_description: "supported commands: add, delete, list, download"
     form: llm
+  - name: skill_space
+    type: string
+    required: true
+    default: "default"
+    label:
+      en_US: Skill Space
+      zh_Hans: Skill 空间
+      pt_BR: Espaço de Skills
+      ja_JP: Skill スペース
+    human_description:
+      en_US: "Skill library managed by this workflow. Use the same value in Skill Agent."
+      zh_Hans: "本节点管理的独立技能库名称，需要与 Skill Agent 节点配置保持一致。"
+      pt_BR: "Biblioteca de skills gerenciada por este workflow."
+      ja_JP: "このワークフローが管理する Skill ライブラリ。"
+    llm_description: "Workflow-level isolated skill library name."
+    form: form
   - name: files
     type: files
     required: false

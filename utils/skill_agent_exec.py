@@ -12,20 +12,66 @@ from typing import Any
 from utils.skill_agent_constants import TEMP_SESSION_PREFIX
 
 
-def _detect_skills_root(explicit_path: str | None) -> str | None:
+DEFAULT_SKILL_SPACE = "default"
+SHARED_SKILL_SPACE = "shared"
+_MAX_SKILL_SPACE_LENGTH = 64
+
+
+def _normalize_skill_space(value: object | None) -> str:
+    """Return a safe, stable skill-space identifier for filesystem/storage keys."""
+    raw = str(value or "").strip() or DEFAULT_SKILL_SPACE
+    if len(raw) > _MAX_SKILL_SPACE_LENGTH:
+        raise ValueError(f"skill_space 长度不能超过 {_MAX_SKILL_SPACE_LENGTH} 个字符")
+    if raw in {".", ".."} or ".." in raw or "/" in raw or "\\" in raw:
+        raise ValueError("skill_space 不能包含路径分隔符或 '..'")
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in raw):
+        raise ValueError("skill_space 不能包含控制字符")
+    return raw
+
+
+def _plugin_root() -> str:
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+
+def _detect_skills_root(explicit_path: str | None, skill_space: object | None = None) -> str | None:
+    """Resolve one workflow-selectable skill library.
+
+    The legacy/default space keeps using ``<plugin>/skills``. Named spaces live
+    beside it under ``<plugin>/skill_spaces/<space>`` so existing installations
+    remain compatible while different workflows can opt into isolated libraries.
+    """
+    space = _normalize_skill_space(skill_space)
+    base_root: str | None = None
     if explicit_path and os.path.isdir(explicit_path):
-        return os.path.abspath(explicit_path)
+        base_root = os.path.abspath(explicit_path)
 
-    env_path = os.getenv("SKILLS_ROOT")
-    if env_path and os.path.isdir(env_path):
-        return os.path.abspath(env_path)
+    if base_root is None:
+        env_path = os.getenv("SKILLS_ROOT")
+        if env_path and os.path.isdir(env_path):
+            base_root = os.path.abspath(env_path)
 
-    # 使用插件包内的 skills/ 目录，升级插件后需重新安装技能
-    plugin_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    skills_dir = os.path.join(plugin_root, "skills")
+    if base_root is None:
+        # 使用插件包内的 skills/ 目录，升级插件后需重新安装技能
+        base_root = os.path.join(_plugin_root(), "skills")
+
+    if space == DEFAULT_SKILL_SPACE:
+        skills_dir = base_root
+    else:
+        skills_dir = os.path.join(os.path.dirname(base_root), "skill_spaces", space)
     if not os.path.isdir(skills_dir):
         os.makedirs(skills_dir, exist_ok=True)
     return os.path.abspath(skills_dir)
+
+
+def _detect_temp_root(skill_space: object | None = None) -> str:
+    """Resolve a cleanup boundary isolated from other skill spaces."""
+    space = _normalize_skill_space(skill_space)
+    if space == DEFAULT_SKILL_SPACE:
+        root = os.path.join(_plugin_root(), "temp")
+    else:
+        root = os.path.join(_plugin_root(), "temp_spaces", space)
+    os.makedirs(root, exist_ok=True)
+    return os.path.abspath(root)
 
 
 def _cleanup_old_temp_sessions(temp_root: str, *, keep: int, protect_dirs: set[str] | None = None) -> None:

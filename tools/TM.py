@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import mimetypes
-import re
 import shutil
 import tempfile
-import uuid
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
@@ -15,6 +13,7 @@ from dify_plugin.entities.tool import ToolInvokeMessage
 
 # 复用 utils/tools.py 中的公共工具函数，消除重复实现
 from utils.skill_agent_constants import MAX_ARCHIVE_MEMBERS, MAX_ARCHIVE_UNCOMPRESSED_BYTES, MAX_UPLOAD_BYTES
+from utils.skill_agent_exec import _detect_skills_root, _normalize_skill_space
 from utils.tools import _download_file_content, _extract_url_and_name, _infer_ext_from_url, _safe_filename
 
 
@@ -25,18 +24,41 @@ def get_file_content(url: str, timeout: int = 30) -> bytes:
         raise RuntimeError(f"文件下载失败: {str(e)}") from e
 
 
-def get_skills_dir() -> Path:
-    root = Path(__file__).resolve().parent.parent
-    skills_dir = root / "skills"
-    skills_dir.mkdir(parents=True, exist_ok=True)
-    return skills_dir
+def get_skills_dir(skill_space: object | None = None) -> Path:
+    skills_root = _detect_skills_root(None, skill_space)
+    if not skills_root:
+        raise RuntimeError("无法初始化技能目录")
+    return Path(skills_root)
 
 
-def list_skills_sorted() -> list[Path]:
-    skills_dir = get_skills_dir()
-    folders = [p for p in skills_dir.iterdir() if p.is_dir()]
-    folders.sort(key=lambda p: p.stat().st_ctime)
+def list_skills_sorted(skill_space: object | None = None) -> list[Path]:
+    skills_dir = get_skills_dir(skill_space)
+    folders = [p for p in skills_dir.iterdir() if p.is_dir() and not p.name.startswith(".")]
+    folders.sort(key=lambda p: p.name.casefold())
     return folders
+
+
+def _skill_name_from_command(command: str, prefix: str) -> str:
+    """Parse a stable folder name from commands such as ``删除技能 demo``."""
+    if not command.startswith(prefix):
+        return ""
+    name = command[len(prefix):].strip()
+    if name.startswith((":", "：")):
+        name = name[1:].strip()
+    if not name or name in {".", ".."} or ".." in name or "/" in name or "\\" in name:
+        return ""
+    return name
+
+
+def _skill_target(skills_dir: Path, skill_name: str) -> Path | None:
+    if not skill_name:
+        return None
+    target = (skills_dir / skill_name).resolve()
+    try:
+        target.relative_to(skills_dir.resolve())
+    except ValueError:
+        return None
+    return target if target.is_dir() else None
 
 
 def _is_within_dir(base: Path, target: Path) -> bool:
@@ -94,14 +116,19 @@ class TMTool(Tool):
     def _invoke(self, tool_parameters: dict[str, Any]) -> Generator[ToolInvokeMessage]:
         command = str(tool_parameters.get("command", "")).strip()
         files_param = tool_parameters.get("files")
+        try:
+            skill_space = _normalize_skill_space(tool_parameters.get("skill_space"))
+        except ValueError as exc:
+            yield self.create_text_message(f"❌Skill Space 配置无效：{exc}\n")
+            return
 
         if command in ("查看技能", "查看 技能", "查看"):
-            skills = list_skills_sorted()
+            skills = list_skills_sorted(skill_space)
             if not skills:
-                yield self.create_text_message("❌当前没有已存入的技能包。\n")
+                yield self.create_text_message(f"Skill Space《{skill_space}》中暂无技能。\n")
                 return
-            lines = [f"{idx + 1}. {p.name}" for idx, p in enumerate(skills)]
-            yield self.create_text_message("\n".join(lines))
+            lines = [f"- {p.name}" for p in skills]
+            yield self.create_text_message(f"Skill Space《{skill_space}》中的技能：\n" + "\n".join(lines))
             return
 
         if command in ("新增技能", "存入技能", "保存技能"):
@@ -117,7 +144,7 @@ class TMTool(Tool):
                 yield self.create_text_message("❌未检测到上传的 zip 文件，请提供 files 参数。\n")
                 return
 
-            skills_dir = get_skills_dir()
+            skills_dir = get_skills_dir(skill_space)
             installed: list[str] = []
 
             for file_item in file_items:
@@ -179,42 +206,46 @@ class TMTool(Tool):
                             yield self.create_text_message(f"❌安装技能失败：{e}\n")
                             return
 
-            yield self.create_text_message("✅技能已安装：\n" + "\n".join(installed) + "\n")
-            skills = list_skills_sorted()
-            lines = [f"{idx + 1}. {p.name}" for idx, p in enumerate(skills)]
-            yield self.create_text_message("👓当前技能列表：\n" + ("\n".join(lines) if lines else "（空）\n"))
+            yield self.create_text_message(f"✅技能已安装到 Skill Space《{skill_space}》：\n" + "\n".join(installed) + "\n")
+            skills = list_skills_sorted(skill_space)
+            lines = [f"- {p.name}" for p in skills]
+            yield self.create_text_message("当前技能列表：\n" + ("\n".join(lines) if lines else "（空）\n"))
             return
 
-        m_del = re.match(r"^删除技能(\d+)$", command)
-        if m_del:
-            idx = int(m_del.group(1))
-            skills = list_skills_sorted()
-            if idx < 1 or idx > len(skills):
-                yield self.create_text_message("❌技能序号无效或超出范围。请先使用“查看技能”确认序号。\n")
+        if command.startswith("删除技能"):
+            skill_name = _skill_name_from_command(command, "删除技能")
+            skills_dir = get_skills_dir(skill_space)
+            target = _skill_target(skills_dir, skill_name)
+            if not skill_name:
+                yield self.create_text_message("❌请按名称删除，例如：删除技能 flow-assistant-skill\n")
                 return
-            target = skills[idx - 1]
+            if target is None:
+                yield self.create_text_message(f"❌Skill Space《{skill_space}》中不存在技能《{skill_name}》。\n")
+                return
             try:
                 shutil.rmtree(target, ignore_errors=False)
             except Exception as e:
                 yield self.create_text_message(f"❌删除失败：{e}\n")
                 return
-            yield self.create_text_message(f"✅已删除技能{idx}：{target.name}\n")
-            skills = list_skills_sorted()
+            yield self.create_text_message(f"✅已从 Skill Space《{skill_space}》删除技能《{target.name}》。\n")
+            skills = list_skills_sorted(skill_space)
             if not skills:
-                yield self.create_text_message("😑当前技能列表为空。\n")
+                yield self.create_text_message("当前技能列表为空。\n")
             else:
-                lines = [f"{i + 1}. {p.name}" for i, p in enumerate(skills)]
-                yield self.create_text_message("👓当前技能列表：\n" + "\n".join(lines))
+                lines = [f"- {p.name}" for p in skills]
+                yield self.create_text_message("当前技能列表：\n" + "\n".join(lines))
             return
 
-        m_dl = re.match(r"^下载技能(\d+)$", command)
-        if m_dl:
-            idx = int(m_dl.group(1))
-            skills = list_skills_sorted()
-            if idx < 1 or idx > len(skills):
-                yield self.create_text_message("❌技能序号无效或超出范围。请先使用“查看技能”确认序号。\n")
+        if command.startswith("下载技能"):
+            skill_name = _skill_name_from_command(command, "下载技能")
+            skills_dir = get_skills_dir(skill_space)
+            target = _skill_target(skills_dir, skill_name)
+            if not skill_name:
+                yield self.create_text_message("❌请按名称下载，例如：下载技能 flow-assistant-skill\n")
                 return
-            target = skills[idx - 1]
+            if target is None:
+                yield self.create_text_message(f"❌Skill Space《{skill_space}》中不存在技能《{skill_name}》。\n")
+                return
 
             try:
                 with tempfile.TemporaryDirectory(prefix="skill-zip-") as td:
@@ -230,7 +261,7 @@ class TMTool(Tool):
             if not mime_type:
                 mime_type = "application/zip"
 
-            yield self.create_text_message(f"⬇️开始下载技能{idx}：{target.name}.zip\n")
+            yield self.create_text_message(f"⬇️开始下载技能《{target.name}》：{target.name}.zip\n")
             yield self.create_blob_message(
                 blob=blob,
                 meta={
@@ -240,5 +271,5 @@ class TMTool(Tool):
             )
             return
 
-        yield self.create_text_message("😑未识别的技能管理命令。支持：查看技能、新增技能、删除技能N、下载技能N。\n")
+        yield self.create_text_message("未识别的技能管理命令。支持：查看技能、新增技能、删除技能 <名称>、下载技能 <名称>。\n")
         return
