@@ -116,6 +116,7 @@ class TMTool(Tool):
     def _invoke(self, tool_parameters: dict[str, Any]) -> Generator[ToolInvokeMessage]:
         command = str(tool_parameters.get("command", "")).strip()
         files_param = tool_parameters.get("files")
+        archive_url = str(tool_parameters.get("archive_url") or "").strip()
         try:
             skill_space = _normalize_skill_space(tool_parameters.get("skill_space"))
         except ValueError as exc:
@@ -140,8 +141,16 @@ class TMTool(Tool):
             elif "file" in tool_parameters and tool_parameters["file"]:
                 file_items = [tool_parameters["file"]]
 
+            # A public ZIP URL is a convenient fallback for automated workflow
+            # updates (for example, a GitHub Release asset or repository archive).
+            # Uploaded files remain the source of truth when both inputs exist.
+            if not file_items and archive_url:
+                file_items = [{"url": archive_url}]
+
             if not file_items:
-                yield self.create_text_message("❌未检测到上传的 zip 文件，请提供 files 参数。\n")
+                yield self.create_text_message(
+                    "❌未检测到技能包，请上传 zip 文件或提供公开的 ZIP 下载地址。\n"
+                )
                 return
 
             skills_dir = get_skills_dir(skill_space)

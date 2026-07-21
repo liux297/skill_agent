@@ -60,6 +60,21 @@ parameters:
       ja_JP: "新增技能 用の zip"
     llm_description: "Zip package(s) for add command"
     form: form
+  - name: archive_url
+    type: string
+    required: false
+    label:
+      en_US: ZIP download URL
+      zh_Hans: ZIP 下载地址
+      pt_BR: URL de download do ZIP
+      ja_JP: ZIP ダウンロード URL
+    human_description:
+      en_US: "Optional public http(s) ZIP URL, such as a GitHub Release asset or repository archive. Used when no file is uploaded."
+      zh_Hans: "可选的公开 http(s) ZIP 直链，例如 GitHub Release 资产或仓库 archive 地址；未上传文件时使用。"
+      pt_BR: "URL http(s) público opcional para o ZIP, usado quando nenhum arquivo é enviado."
+      ja_JP: "ファイル未アップロード時に使用する公開 http(s) ZIP URL。"
+    llm_description: "Optional public http(s) ZIP URL for the add command; uploaded files take precedence."
+    form: form
 extra:
   python:
     source: tools/TM.py
