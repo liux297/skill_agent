@@ -50,6 +50,18 @@ def _skill_name_from_command(command: str, prefix: str) -> str:
     return name
 
 
+def _skill_name_from_aliases(command: str, prefixes: tuple[str, ...]) -> str:
+    """Parse a skill name from localized or English command prefixes."""
+    normalized = command.casefold()
+    for prefix in prefixes:
+        folded_prefix = prefix.casefold()
+        if normalized == folded_prefix:
+            return ""
+        if normalized.startswith((folded_prefix + " ", folded_prefix + ":", folded_prefix + "：")):
+            return _skill_name_from_command(command, command[: len(prefix)])
+    return ""
+
+
 def _skill_target(skills_dir: Path, skill_name: str) -> Path | None:
     if not skill_name:
         return None
@@ -115,6 +127,7 @@ def _find_skill_folders(extracted_root: Path) -> list[Path]:
 class TMTool(Tool):
     def _invoke(self, tool_parameters: dict[str, Any]) -> Generator[ToolInvokeMessage]:
         command = str(tool_parameters.get("command", "")).strip()
+        normalized_command = " ".join(command.casefold().split())
         files_param = tool_parameters.get("files")
         archive_url = str(tool_parameters.get("archive_url") or "").strip()
         try:
@@ -123,7 +136,9 @@ class TMTool(Tool):
             yield self.create_text_message(f"❌Skill Space 配置无效：{exc}\n")
             return
 
-        if command in ("查看技能", "查看 技能", "查看"):
+        if command in ("查看技能", "查看 技能", "查看") or normalized_command in {
+            "list", "list skill", "list skills",
+        }:
             skills = list_skills_sorted(skill_space)
             if not skills:
                 yield self.create_text_message(f"Skill Space《{skill_space}》中暂无技能。\n")
@@ -132,7 +147,9 @@ class TMTool(Tool):
             yield self.create_text_message(f"Skill Space《{skill_space}》中的技能：\n" + "\n".join(lines))
             return
 
-        if command in ("新增技能", "存入技能", "保存技能"):
+        if command in ("新增技能", "存入技能", "保存技能") or normalized_command in {
+            "add", "add skill", "add skills", "install skill", "install skills",
+        }:
             file_items: list[Any] = []
             if isinstance(files_param, list):
                 file_items = [x for x in files_param if x]
@@ -221,8 +238,11 @@ class TMTool(Tool):
             yield self.create_text_message("当前技能列表：\n" + ("\n".join(lines) if lines else "（空）\n"))
             return
 
-        if command.startswith("删除技能"):
-            skill_name = _skill_name_from_command(command, "删除技能")
+        delete_prefixes = ("删除技能", "delete skill", "delete", "remove skill", "remove")
+        if command.startswith("删除技能") or any(
+            normalized_command.startswith((prefix + " ", prefix + ":")) for prefix in delete_prefixes[1:]
+        ):
+            skill_name = _skill_name_from_aliases(command, delete_prefixes)
             skills_dir = get_skills_dir(skill_space)
             target = _skill_target(skills_dir, skill_name)
             if not skill_name:
@@ -245,8 +265,11 @@ class TMTool(Tool):
                 yield self.create_text_message("当前技能列表：\n" + "\n".join(lines))
             return
 
-        if command.startswith("下载技能"):
-            skill_name = _skill_name_from_command(command, "下载技能")
+        download_prefixes = ("下载技能", "download skill", "download", "export skill", "export")
+        if command.startswith("下载技能") or any(
+            normalized_command.startswith((prefix + " ", prefix + ":")) for prefix in download_prefixes[1:]
+        ):
+            skill_name = _skill_name_from_aliases(command, download_prefixes)
             skills_dir = get_skills_dir(skill_space)
             target = _skill_target(skills_dir, skill_name)
             if not skill_name:

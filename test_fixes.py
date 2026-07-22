@@ -16,7 +16,7 @@ from utils.skill_agent_runtime import _extract_declared_skill_version
 from utils.skill_agent_storage import _get_history_storage_key
 from utils.tools import _safe_join
 from dify_plugin.entities.tool import ToolInvokeMessage
-from tools.TM import _skill_name_from_command, _skill_target
+from tools.TM import _skill_name_from_aliases, _skill_name_from_command, _skill_target
 from tools.skill_agent import SkillAgentTool, _completed_process_markup, _normalize_user_answer, _open_details_markup
 
 
@@ -507,6 +507,15 @@ class TestSkillSpaces(unittest.TestCase):
         self.assertEqual(_skill_name_from_command("删除技能 flow-assistant-skill", "删除技能"), "flow-assistant-skill")
         self.assertEqual(_skill_name_from_command("下载技能：flow-assistant-skill", "下载技能"), "flow-assistant-skill")
         self.assertEqual(_skill_name_from_command("删除技能 ../other", "删除技能"), "")
+        self.assertEqual(
+            _skill_name_from_aliases("delete skill flow-assistant-skill", ("删除技能", "delete skill")),
+            "flow-assistant-skill",
+        )
+        self.assertEqual(
+            _skill_name_from_aliases("DOWNLOAD: flow-assistant-skill", ("下载技能", "download")),
+            "flow-assistant-skill",
+        )
+        self.assertEqual(_skill_name_from_aliases("delete skill ../other", ("delete skill",)), "")
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             target = root / "flow-assistant-skill"

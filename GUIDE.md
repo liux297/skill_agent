@@ -40,8 +40,8 @@ Start → Conditional ─────┼─ update command ─────→ Do
 
 Condition examples:
 
-- Management: query contains `查看技能`, `新增技能`, `删除技能`, or `下载技能`
-- Update: query contains `更新技能`
+- Management: query contains `list skills`, `add skill`, `delete skill`, or `download skill`
+- Update: query contains `update skill`
 - Otherwise: normal Skill Agent request
 
 Use the same `skill_space` on all Skill Manager and Skill Agent nodes.
@@ -50,7 +50,7 @@ Use the same `skill_space` on all Skill Manager and Skill Agent nodes.
 
 1. Add an `Array[File]` start variable.
 2. Map it to Skill Manager `files`.
-3. Set the fixed command to `新增技能` or route a user command.
+3. Set the fixed command to `add skill` or route a user command.
 4. Set `skill_space` to the target workflow library.
 5. Return the Skill Manager text output.
 
@@ -62,7 +62,7 @@ Use this for a public GitHub Release asset or repository archive.
 
 | Skill Manager field | Value |
 |---|---|
-| `command` | `新增技能` |
+| `command` | `add skill` |
 | `skill_space` | Target workflow space |
 | `files` | Empty |
 | `archive_url` | Public credential-free `https://...zip` |
@@ -74,10 +74,10 @@ Uploaded files take precedence if both `files` and `archive_url` are provided.
 Skill Manager intentionally refuses to overwrite an existing folder. Use an explicit replacement branch:
 
 1. Validate the new ZIP in a staging Skill Space.
-2. Run `下载技能 <name>` if a backup is required.
-3. Run `删除技能 <name>` in the production space.
-4. Run `新增技能` with the validated ZIP or public URL.
-5. Run `查看技能` and a smoke-test question.
+2. Run `download skill <name>` if a backup is required.
+3. Run `delete skill <name>` in the production space.
+4. Run `add skill` with the validated ZIP or public URL.
+5. Run `list skills` and a smoke-test question.
 
 For zero-downtime rollout, install the new version under a new Skill Space, switch the workflow configuration, test, and then remove the old space later.
 
@@ -210,7 +210,7 @@ Keep the following in `SKILL.md`, not the node system prompt:
 
 Temporarily set `verbose=true`, then verify in order:
 
-1. The expected skill appears in `查看技能`.
+1. The expected skill appears in `list skills`.
 2. `skill_space` and `enabled_skills` exactly match the folder name.
 3. `skill_version` matches the declared version.
 4. The model reads `SKILL.md` before skill files or commands.
