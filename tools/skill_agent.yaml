@@ -72,11 +72,11 @@ parameters:
       pt_BR: Skills habilitadas
       ja_JP: 有効な Skills
     human_description:
-      en_US: "Optional comma-separated skill folder names. Leave empty to expose every skill in the selected space."
-      zh_Hans: "可选，填写逗号分隔的技能目录名称；留空表示使用当前空间的全部技能。"
-      pt_BR: "Nomes de skills separados por vírgula; vazio habilita todas."
-      ja_JP: "カンマ区切りの Skill フォルダー名。空欄ではすべて有効。"
-    llm_description: "Optional allow-list of skill folder names."
+      en_US: "Optional comma-separated skill names; each entry may be the skill's folder name or the name declared in its SKILL.md. Leave empty to expose every skill in the selected space."
+      zh_Hans: "可选，填写逗号分隔的技能名称（技能目录名或 SKILL.md 中声明的 name 均可，两者等价）；留空表示使用当前空间的全部技能。"
+      pt_BR: "Nomes de skills separados por vírgula (pasta ou nome declarado no SKILL.md); vazio habilita todas."
+      ja_JP: "カンマ区切りの Skill 名（フォルダー名または SKILL.md の name 宣言のどちらでも可）。空欄ではすべて有効。"
+    llm_description: "Optional allow-list of skill names; each entry may be a folder name or the name declared in SKILL.md."
     form: form
 
   - name: skill_version

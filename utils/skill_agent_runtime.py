@@ -130,9 +130,71 @@ class _AgentRuntime:
         self.allowed_commands = requested & (ALLOWED_COMMANDS | (UNSAFE_COMMANDS if allow_unsafe_commands else set()))
         self._skill_metadata_cache: dict[str, dict[str, Any]] = {}
         self._skill_files_listed: set[str] = set()
+        # 技能目录扫描缓存：(folder, declared_name, root, scope) 列表。
+        # runtime 实例随每次工具调用新建，实例级缓存安全；install/uninstall 后主动失效。
+        self._skill_entries_cache: list[tuple[str, str, str, str]] | None = None
+
+    def _skill_entries(self) -> list[tuple[str, str, str, str]]:
+        """扫描全部技能根目录，返回 (folder, declared_name, root, scope) 列表（含缓存）。
+
+        declared_name 取自 SKILL.md frontmatter 的 name 字段，缺省时回退为目录名。
+        顺序与 _skill_roots() 一致（private 优先），不做去重，由调用方按序取首个匹配。
+        """
+        if self._skill_entries_cache is not None:
+            return self._skill_entries_cache
+        entries: list[tuple[str, str, str, str]] = []
+        for root, scope in self._skill_roots():
+            try:
+                folders = sorted(os.listdir(root))
+            except OSError:
+                continue
+            for folder in folders:
+                if folder.startswith("."):
+                    continue
+                path = os.path.join(root, folder)
+                if not os.path.isdir(path):
+                    continue
+                declared = ""
+                skill_md = os.path.join(path, "SKILL.md")
+                if os.path.isfile(skill_md):
+                    try:
+                        declared = str(_parse_frontmatter(_read_text(skill_md, 4000)).get("name") or "").strip()
+                    except OSError:
+                        declared = ""
+                entries.append((folder, declared or folder, root, scope))
+        self._skill_entries_cache = entries
+        return entries
+
+    def _resolve_skill_folder(self, skill_name: str) -> tuple[str, str, str, str] | None:
+        """将技能名统一解析为 (folder, declared_name, root, scope)。
+
+        目录名与 SKILL.md 声明名等价可用；目录名精确匹配优先（避免与他技能的声明名撞名），
+        声明名匹配按 _skill_roots() 顺序取首个（private 覆盖 shared）。
+        """
+        name = str(skill_name or "").strip()
+        if not name:
+            return None
+        entries = self._skill_entries()
+        for folder, declared, root, scope in entries:
+            if folder == name:
+                return folder, declared, root, scope
+        for folder, declared, root, scope in entries:
+            if declared == name:
+                return folder, declared, root, scope
+        return None
 
     def _skill_is_enabled(self, skill_name: str) -> bool:
-        return self.enabled_skills is None or str(skill_name or "").strip() in self.enabled_skills
+        """启用判断：enabled_skills 中填写目录名或 SKILL.md 声明名均视为启用。"""
+        if self.enabled_skills is None:
+            return True
+        name = str(skill_name or "").strip()
+        if name in self.enabled_skills:
+            return True
+        resolved = self._resolve_skill_folder(name)
+        if not resolved:
+            return False
+        folder, declared, _root, _scope = resolved
+        return folder in self.enabled_skills or declared in self.enabled_skills
 
     def _skill_roots(self) -> list[tuple[str, str]]:
         roots: list[tuple[str, str]] = []
@@ -154,6 +216,17 @@ class _AgentRuntime:
                 "skill": name,
                 "detail": "当前工作流未启用该技能。",
             }
+        # 先按别名解析（目录名/声明名等价）定位真实目录，解析结果来自磁盘扫描，路径安全
+        resolved = self._resolve_skill_folder(name)
+        if resolved:
+            folder, _declared, root, scope = resolved
+            try:
+                path = _safe_join(root, folder)
+            except Exception as exc:
+                return None, None, {"error": "invalid skill_name", "skill": name, "exception": str(exc)}
+            if os.path.isdir(path) and os.path.isfile(os.path.join(path, "SKILL.md")):
+                return path, scope, None
+        # 未解析到（可能技能不存在）时按原名回退，保持 skill_not_found/invalid skill_name 语义
         for root, scope in self._skill_roots():
             try:
                 path = _safe_join(root, name)
@@ -562,6 +635,7 @@ class _AgentRuntime:
             return {"error": f"安装失败: {str(e)}", "source": src, "destination": dst}
         # 清除该技能的 metadata 缓存，使其立即可被 load_skills_index 发现
         self._skill_metadata_cache.pop(safe_name, None)
+        self._skill_entries_cache = None
         # 验证安装结果
         return {
             "skill": safe_name,
@@ -604,24 +678,95 @@ class _AgentRuntime:
         }
 
     def uninstall_skill(self, *, skill_name: str) -> dict[str, Any]:
-        """按名称从 skills_root 删除技能。"""
+        """按目录名或 SKILL.md 中声明的名称从 skills_root 删除技能。"""
         if not self.skills_root:
             return {"error": "skills_root 未配置，无法删除技能。"}
         safe_name = skill_name.replace("/", "").replace("\\", "").replace("..", "").strip()
         if not safe_name:
             return {"error": "skill_name 不能为空或包含非法字符", "skill_name": skill_name}
-        if not self._skill_is_enabled(safe_name):
-            return {"error": "skill_not_enabled", "skill": safe_name, "detail": "当前工作流未启用该技能。"}
-        target = _safe_join(self.skills_root, safe_name)
-        if not os.path.isdir(target):
-            return {"error": "技能不存在", "skill_name": safe_name, "skills_root": self.skills_root}
+
+        def _installed_entries(root: str | None) -> list[tuple[str, str]]:
+            if not root or not os.path.isdir(root):
+                return []
+            entries: list[tuple[str, str]] = []
+            for folder in sorted(os.listdir(root)):
+                if folder.startswith("."):
+                    continue
+                path = os.path.join(root, folder)
+                if not os.path.isdir(path):
+                    continue
+                skill_md = os.path.join(path, "SKILL.md")
+                try:
+                    meta = _parse_frontmatter(_read_text(skill_md, 4000)) if os.path.isfile(skill_md) else {}
+                except OSError:
+                    meta = {}
+                entries.append((folder, str(meta.get("name") or folder).strip()))
+            return entries
+
+        private_entries = _installed_entries(self.skills_root)
+        exact_match = next((folder for folder, _ in private_entries if folder == safe_name), None)
+        if exact_match:
+            if not self._skill_is_enabled(exact_match):
+                return {
+                    "error": "skill_not_enabled",
+                    "skill": exact_match,
+                    "detail": "当前工作流未启用该技能。",
+                }
+            resolved_name = exact_match
+        else:
+            display_matches = [folder for folder, display_name in private_entries if display_name == safe_name]
+            enabled_matches = [folder for folder in display_matches if self._skill_is_enabled(folder)]
+            if len(enabled_matches) > 1:
+                return {
+                    "error": "技能名称不唯一，请使用 folder 字段指定要删除的技能",
+                    "skill_name": safe_name,
+                    "candidates": enabled_matches,
+                }
+            if enabled_matches:
+                resolved_name = enabled_matches[0]
+            elif display_matches:
+                return {
+                    "error": "skill_not_enabled",
+                    "skill": safe_name,
+                    "candidates": display_matches,
+                    "detail": "当前工作流未启用该技能。",
+                }
+            else:
+                shared_matches = [
+                    folder
+                    for folder, display_name in _installed_entries(self.shared_skills_root)
+                    if self._skill_is_enabled(folder) and safe_name in (folder, display_name)
+                ]
+                if shared_matches:
+                    return {
+                        "error": "skill_read_only",
+                        "skill_name": safe_name,
+                        "candidates": shared_matches,
+                        "detail": "该技能来自公共只读技能空间，不能在当前工作流中删除。",
+                    }
+                if not self._skill_is_enabled(safe_name):
+                    return {
+                        "error": "skill_not_enabled",
+                        "skill": safe_name,
+                        "detail": "当前工作流未启用该技能。",
+                    }
+                return {"error": "技能不存在", "skill_name": safe_name, "skills_root": self.skills_root}
+
+        target = _safe_join(self.skills_root, resolved_name)
         try:
             shutil.rmtree(target, ignore_errors=False)
         except Exception as e:
-            return {"error": f"删除失败: {str(e)}", "skill_name": safe_name, "path": target}
+            return {"error": f"删除失败: {str(e)}", "skill_name": resolved_name, "path": target}
         # 清除缓存
+        self._skill_metadata_cache.pop(resolved_name, None)
         self._skill_metadata_cache.pop(safe_name, None)
-        return {"skill": safe_name, "uninstalled": True, "path": target}
+        self._skill_entries_cache = None
+        return {
+            "skill": resolved_name,
+            "requested_name": safe_name,
+            "uninstalled": True,
+            "path": target,
+        }
 
     def update_skill(self, *, skill_name: str, source_path: str) -> dict[str, Any]:
         """覆盖式更新技能：通过 install_skill 的 staging + replace 保留旧版本直到新版本可用。"""
@@ -632,13 +777,16 @@ class _AgentRuntime:
             return {"error": "skill_name 不能为空或包含非法字符", "skill_name": skill_name}
         if not self._skill_is_enabled(safe_name):
             return {"error": "skill_not_enabled", "skill": safe_name, "detail": "当前工作流未启用该技能。"}
-        target = _safe_join(self.skills_root, safe_name)
+        # 声明名与目录名等价：先解析到真实目录名再定位旧版本
+        resolved = self._resolve_skill_folder(safe_name)
+        folder = resolved[0] if resolved else safe_name
+        target = _safe_join(self.skills_root, folder)
         # 检查旧版本是否存在
         if not os.path.isdir(target):
             return {"error": f"技能 '{safe_name}' 不存在，无法更新。请先使用 install_skill 安装。", "skill_name": safe_name}
         # install_skill performs an atomic replacement and restores the old version
         # if activation fails.
-        result = self.install_skill(source_path=source_path, skill_name=safe_name)
+        result = self.install_skill(source_path=source_path, skill_name=folder)
         if result.get("error"):
             return {**result, "note": "新版本未安装成功，已保留旧版本"}
         return {**result, "updated": True}

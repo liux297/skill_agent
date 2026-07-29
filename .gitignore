@@ -170,6 +170,12 @@ skills/
 !skill_agent-0.2.9.difypkg
 dify-plugin-*
 
+# Plugin signing keys (never commit)
+*.pem
+*.private
+*.public
+skill_agent_signing*
+
 /logs
 /dify-marketplace-backend
 /.scripts

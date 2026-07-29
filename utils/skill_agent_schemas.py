@@ -179,10 +179,19 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "uninstall_skill",
-            "description": "按技能名称从 skills_root 中删除已安装的技能。删除后该技能不再可用。",
+            "description": (
+                "按技能的展示名称（name）或安装目录名（folder）从 skills_root 中删除已安装的私有技能。"
+                "当 list_installed_skills 返回的 name 与 folder 不同时，两者均可使用；folder 最精确。"
+                "公共只读技能不能删除。"
+            ),
             "parameters": {
                 "type": "object",
-                "properties": {"skill_name": {"type": "string"}},
+                "properties": {
+                    "skill_name": {
+                        "type": "string",
+                        "description": "list_installed_skills 返回的 name 或 folder；重名时必须使用 folder",
+                    }
+                },
                 "required": ["skill_name"],
             },
         },

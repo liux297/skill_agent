@@ -429,6 +429,217 @@ class TestSkillInstallSafety(unittest.TestCase):
             self.assertIn("error", runtime.run_temp_command(command=["python", "-m", "pip"], auto_install=True))
 
 
+class TestSkillUninstallResolution(unittest.TestCase):
+    def _runtime(self, private: Path, session: Path, **kwargs) -> _AgentRuntime:
+        return _AgentRuntime(
+            skills_root=str(private), session_dir=str(session), max_steps=1,
+            memory_turns=1, allowed_commands=set(ALLOWED_COMMANDS), **kwargs,
+        )
+
+    @staticmethod
+    def _add_skill(root: Path, folder: str, display_name: str) -> Path:
+        skill = root / folder
+        skill.mkdir()
+        (skill / "SKILL.md").write_text(
+            f"---\nname: {display_name}\ndescription: test\n---\n",
+            encoding="utf-8",
+        )
+        return skill
+
+    def test_display_name_deletes_matching_folder_with_multiple_skills(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            private, session = base / "skills", base / "session"
+            private.mkdir(); session.mkdir()
+            self._add_skill(private, "chinese-novelist", "chinese-novelist")
+            weather = self._add_skill(private, "skill-weather", "weather")
+
+            result = self._runtime(
+                private,
+                session,
+                enabled_skills={"chinese-novelist", "skill-weather"},
+            ).uninstall_skill(skill_name="weather")
+
+            self.assertTrue(result["uninstalled"])
+            self.assertEqual(result["skill"], "skill-weather")
+            self.assertEqual(result["requested_name"], "weather")
+            self.assertFalse(weather.exists())
+            self.assertTrue((private / "chinese-novelist").exists())
+
+    def test_exact_folder_wins_over_another_skills_display_name(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            private, session = base / "skills", base / "session"
+            private.mkdir(); session.mkdir()
+            exact = self._add_skill(private, "weather", "canonical-weather")
+            alias = self._add_skill(private, "skill-weather", "weather")
+
+            result = self._runtime(private, session).uninstall_skill(skill_name="weather")
+
+            self.assertTrue(result["uninstalled"])
+            self.assertFalse(exact.exists())
+            self.assertTrue(alias.exists())
+
+    def test_duplicate_display_name_requires_folder(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            private, session = base / "skills", base / "session"
+            private.mkdir(); session.mkdir()
+            first = self._add_skill(private, "weather-a", "weather")
+            second = self._add_skill(private, "weather-b", "weather")
+
+            result = self._runtime(private, session).uninstall_skill(skill_name="weather")
+
+            self.assertIn("不唯一", result["error"])
+            self.assertEqual(result["candidates"], ["weather-a", "weather-b"])
+            self.assertTrue(first.exists())
+            self.assertTrue(second.exists())
+
+    def test_shared_skill_returns_read_only_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            private, shared, session = base / "private", base / "shared", base / "session"
+            private.mkdir(); shared.mkdir(); session.mkdir()
+            self._add_skill(shared, "skill-weather", "weather")
+
+            result = self._runtime(
+                private, session, shared_skills_root=str(shared),
+            ).uninstall_skill(skill_name="weather")
+
+            self.assertEqual(result["error"], "skill_read_only")
+            self.assertTrue((shared / "skill-weather").exists())
+
+
+class TestSkillNameAliasResolution(unittest.TestCase):
+    """技能名统一：目录名与 SKILL.md 声明名在启用校验/技能定位中等价可用。"""
+
+    def _runtime(self, private: Path, session: Path, **kwargs) -> _AgentRuntime:
+        return _AgentRuntime(
+            skills_root=str(private), session_dir=str(session), max_steps=1,
+            memory_turns=1, allowed_commands=set(ALLOWED_COMMANDS), **kwargs,
+        )
+
+    @staticmethod
+    def _add_skill(root: Path, folder: str, display_name: str) -> Path:
+        skill = root / folder
+        skill.mkdir()
+        (skill / "SKILL.md").write_text(
+            f"---\nname: {display_name}\ndescription: test\n---\n",
+            encoding="utf-8",
+        )
+        return skill
+
+    def test_enabled_by_folder_callable_by_declared_name(self):
+        """市场安装场景：启用列表是长目录名，模型按声明名调用。"""
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            private, session = base / "skills", base / "session"
+            private.mkdir(); session.mkdir()
+            folder = "skills-steipete.weather-master-e81a4f"
+            self._add_skill(private, folder, "weather")
+            runtime = self._runtime(private, session, enabled_skills={folder})
+
+            metadata = runtime.get_skill_metadata("weather")
+            self.assertEqual(metadata["skill"], "weather")
+            self.assertEqual(metadata["metadata"].get("name"), "weather")
+            self.assertEqual(runtime.list_skill_files("weather")["skill"], "weather")
+            # 索引不受启用列表写法影响，两种名字都能看到技能
+            index = runtime.load_skills_index()
+            self.assertEqual([s["folder"] for s in index["skills"]], [folder])
+            self.assertEqual(index["skills"][0]["name"], "weather")
+            self.assertTrue(runtime.validate_skill_selection().get("ok"))
+
+    def test_enabled_by_declared_name_callable_by_folder(self):
+        """启用列表写声明名，用目录名调用同样放行。"""
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            private, session = base / "skills", base / "session"
+            private.mkdir(); session.mkdir()
+            folder = "skills-steipete.weather-master-e81a4f"
+            self._add_skill(private, folder, "weather")
+            runtime = self._runtime(private, session, enabled_skills={"weather"})
+
+            metadata = runtime.get_skill_metadata(folder)
+            self.assertIn("metadata", metadata)
+            index = runtime.load_skills_index()
+            self.assertEqual([s["folder"] for s in index["skills"]], [folder])
+            self.assertTrue(runtime.validate_skill_selection().get("ok"))
+
+    def test_disabled_skill_rejected_by_any_name(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            private, session = base / "skills", base / "session"
+            private.mkdir(); session.mkdir()
+            folder = "skills-steipete.weather-master-e81a4f"
+            self._add_skill(private, folder, "weather")
+            self._add_skill(private, "demo", "demo")
+            runtime = self._runtime(private, session, enabled_skills={"demo"})
+
+            self.assertEqual(runtime.get_skill_metadata("weather")["error"], "skill_not_enabled")
+            self.assertEqual(runtime.get_skill_metadata(folder)["error"], "skill_not_enabled")
+            index = runtime.load_skills_index()
+            self.assertEqual([s["folder"] for s in index["skills"]], ["demo"])
+
+    def test_exact_folder_wins_over_declared_name(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            private, session = base / "skills", base / "session"
+            private.mkdir(); session.mkdir()
+            self._add_skill(private, "weather", "canonical-weather")
+            self._add_skill(private, "skill-weather", "weather")
+            runtime = self._runtime(private, session)
+
+            metadata = runtime.get_skill_metadata("weather")
+            self.assertEqual(metadata["metadata"].get("name"), "canonical-weather")
+
+    def test_shared_skill_resolved_by_declared_name(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            private, shared, session = base / "private", base / "shared", base / "session"
+            private.mkdir(); shared.mkdir(); session.mkdir()
+            self._add_skill(shared, "skill-weather", "weather")
+            runtime = self._runtime(private, session, shared_skills_root=str(shared))
+
+            metadata = runtime.get_skill_metadata("weather")
+            self.assertEqual(metadata["scope"], "shared")
+            # private 覆盖 shared：同名声明时优先私有目录
+            self._add_skill(private, "my-weather", "weather")
+            runtime2 = self._runtime(private, session, shared_skills_root=str(shared))
+            metadata2 = runtime2.get_skill_metadata("weather")
+            self.assertEqual(metadata2["scope"], "private")
+
+    def test_update_skill_accepts_declared_name(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            private, session = base / "skills", base / "session"
+            private.mkdir(); session.mkdir()
+            folder = "skills-steipete.weather-master-e81a4f"
+            self._add_skill(private, folder, "weather")
+            # 准备新版本源目录（同名声明，版本内容不同）
+            src = session / "new-weather"
+            src.mkdir()
+            (src / "SKILL.md").write_text(
+                "---\nname: weather\ndescription: v2\n---\n", encoding="utf-8",
+            )
+            runtime = self._runtime(private, session, enabled_skills={"weather"})
+
+            result = runtime.update_skill(skill_name="weather", source_path="new-weather")
+            self.assertTrue(result.get("updated"))
+            self.assertEqual(result["skill"], folder)
+            self.assertIn("v2", (private / folder / "SKILL.md").read_text(encoding="utf-8"))
+
+    def test_invalid_name_still_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            private, session = base / "skills", base / "session"
+            private.mkdir(); session.mkdir()
+            self._add_skill(private, "demo", "demo")
+            runtime = self._runtime(private, session)
+
+            self.assertEqual(runtime.get_skill_metadata("missing")["error"], "skill_not_found")
+            self.assertIn("error", runtime.get_skill_metadata("../demo"))
+
+
 class TestSkillSpaces(unittest.TestCase):
     def _runtime(self, private: Path, session: Path, **kwargs) -> _AgentRuntime:
         return _AgentRuntime(

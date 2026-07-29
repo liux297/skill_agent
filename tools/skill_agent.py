@@ -401,7 +401,7 @@ class SkillAgentTool(Tool):
             + "  (2) 调用 install_skill 成功后，技能会安装到 skills_root\n"
             + "  (3) 安装成功后即可通过 get_skill_metadata / list_skill_files 等工具使用该技能\n"
             + "  (4) 如需查看已安装的全部技能，调用 list_installed_skills()\n"
-            + "  (5) 如需删除技能，调用 uninstall_skill(skill_name)\n"
+            + "  (5) 如需删除技能，调用 uninstall_skill(skill_name)；skill_name 可使用列表返回的 name 或 folder，重名时使用 folder\n"
             + "  (6) 如需更新已有技能，调用 update_skill(skill_name, source_path)，source_path 为新的 zip 或解压目录\n"
             + (uploads_context or "")
             + "你必须把实现过程中的中间产物写入 temp 会话目录（脚本、草稿、生成物等）：\n"
@@ -422,12 +422,13 @@ class SkillAgentTool(Tool):
             + "- export_temp_file(temp_relative_path, workspace_relative_path, overwrite)  # 不复制，仅标记交付名\n"
             + "- install_skill(source_path, skill_name)  # 从上传的 zip/目录安装技能到 skills_root\n"
             + "- list_installed_skills()  # 查看所有已安装技能\n"
-            + "- uninstall_skill(skill_name)  # 按名称删除已安装技能\n"
+            + "- uninstall_skill(skill_name)  # 按 name 或 folder 删除已安装私有技能\n"
             + "- update_skill(skill_name, source_path)  # 按名称用新 zip/目录覆盖更新技能\n\n"
             + "如果模型支持 function call，请直接发起工具调用；若不支持，则用 JSON 协议响应：\n"
             + '{"type":"tool","name":"get_skill_metadata","arguments":{"skill_name":"xxx"}}\n'
             + '或 {"type":"final","content":"..."}\n\n'
             + "技能索引（用于判断是否需要调用技能）：\n"
+            + "注意：调用技能相关工具时，skill_name 填索引中的 name 或 folder 均可，系统会识别为同一技能（enabled_skills 配置同理，两者等价）。\n"
             + (lambda si: (lambda s: s if len(s) <= 8000 else json.dumps({"skills": si.get("skills", [])[:10], "truncated": True, "note": "技能索引过长已截断，请用 list_installed_skills 查看完整列表"}, ensure_ascii=False))(json.dumps(si, ensure_ascii=False)))(skills_index)
             + (resume_context or "")
         )
@@ -828,9 +829,12 @@ class SkillAgentTool(Tool):
                     for s in skills_list[:30]:
                         if isinstance(s, dict):
                             name = s.get("name") or s.get("folder") or ""
+                            folder = s.get("folder") or ""
                             desc = (s.get("description") or "")[:60]
                             has_md = "✔" if s.get("has_skill_md") else "✘"
                             line = f"    • {name}"
+                            if folder and folder != name:
+                                line += f"（目录：{folder}）"
                             if desc:
                                 line += f" — {desc}"
                             line += f"  [{has_md} SKILL.md]"
