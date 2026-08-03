@@ -1,6 +1,6 @@
 # Skill Agent
 
-**Version:** 0.2.33 · **Type:** Dify tool plugin · **License:** Apache-2.0
+**Version:** 0.2.35 · **Type:** Dify tool plugin · **License:** Apache-2.0
 **Author:** [liux297](https://github.com/liux297) · **Source:** [github.com/liux297/skill_agent](https://github.com/liux297/skill_agent)
 
 [Simplified Chinese guide](readme/README_zh_Hans.md) · [Complete operations guide](GUIDE.md) · [Privacy policy](PRIVACY.md)

@@ -193,6 +193,8 @@ Thumbs.db
 # Dify plugin packages
 #  To prevent packaging repetitively
 *.difypkg
+# Local signing material must never be shipped inside the plugin archive.
+*.pem
 temp/
 skills/
 screenshot_*.png

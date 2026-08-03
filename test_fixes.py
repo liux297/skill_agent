@@ -3,6 +3,8 @@ import json
 import unittest
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 
 # ========== 导入项目模块 ==========
@@ -119,6 +121,125 @@ class TestVerboseParsing(unittest.TestCase):
 
     def test_verbose_string_zero(self):
         self.assertFalse(self._parse_verbose("0"))
+
+
+class TestLiveAnswerStreaming(unittest.TestCase):
+    class _Storage:
+        def __init__(self):
+            self.data = {}
+
+        def get(self, key):
+            return self.data.get(key)
+
+        def set(self, key, value):
+            self.data[key] = value
+
+    class _StreamingLLM:
+        def __init__(self, parts):
+            self.parts = list(parts)
+            self.consumed = 0
+
+        def invoke(self, **_kwargs):
+            for part in self.parts:
+                self.consumed += 1
+                yield {"delta": {"message": {"content": part}}}
+
+    class _SequencedLLM:
+        def __init__(self, responses):
+            self.responses = [list(parts) for parts in responses]
+            self.calls = 0
+
+        def invoke(self, **_kwargs):
+            parts = self.responses[self.calls]
+            self.calls += 1
+            for part in parts:
+                yield {"delta": {"message": {"content": part}}}
+
+    @staticmethod
+    def _message_text(message):
+        return str(getattr(getattr(message, "message", None), "text", "") or "")
+
+    def test_final_answer_streams_while_verbose_is_disabled(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            skills = base / "skills"
+            temp_root = base / "temp"
+            skills.mkdir(); temp_root.mkdir()
+
+            llm = self._StreamingLLM(["内", "容", "流", "式"])
+            tool = object.__new__(SkillAgentTool)
+            tool.response_type = ToolInvokeMessage
+            tool.session = SimpleNamespace(
+                storage=self._Storage(),
+                model=SimpleNamespace(llm=llm),
+                conversation_id="streaming-test",
+            )
+            parameters = {
+                "query": "测试流式输出",
+                "model": {"provider": "test", "mode": "chat", "model": "fake"},
+                "max_steps": 1,
+                "memory_turns": 1,
+                "verbose": False,
+                "skills_root": str(skills),
+                "skill_space": "default",
+            }
+
+            with mock.patch("tools.skill_agent._detect_temp_root", return_value=str(temp_root)):
+                output = tool._invoke(parameters)
+                messages = [next(output)]
+                # The process panel is emitted before the model is consumed.
+                self.assertEqual(llm.consumed, 0)
+                messages.append(next(output))
+                # Closing the process panel happens as soon as the first model
+                # delta arrives, before the remaining deltas are consumed.
+                self.assertEqual(llm.consumed, 1)
+                messages.append(next(output))
+                self.assertEqual(llm.consumed, 1)
+                messages.extend(output)
+
+            rendered = "".join(self._message_text(message) for message in messages)
+            self.assertEqual(llm.consumed, 4)
+            self.assertEqual(rendered.count("内容流式"), 1)
+
+    def test_internal_json_stays_hidden_before_streaming_final_answer(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            skills = base / "skills"
+            temp_root = base / "temp"
+            skills.mkdir(); temp_root.mkdir()
+
+            protocol = '{"type":"tool","name":"list_installed_skills","arguments":{}}'
+            llm = self._SequencedLLM(
+                [
+                    [protocol[:12], protocol[12:35], protocol[35:]],
+                    ["最", "终", "答", "案"],
+                ]
+            )
+            tool = object.__new__(SkillAgentTool)
+            tool.response_type = ToolInvokeMessage
+            tool.session = SimpleNamespace(
+                storage=self._Storage(),
+                model=SimpleNamespace(llm=llm),
+                conversation_id="json-filter-test",
+            )
+            parameters = {
+                "query": "查看并总结技能",
+                "model": {"provider": "test", "mode": "text", "model": "fake"},
+                "max_steps": 2,
+                "memory_turns": 2,
+                "verbose": False,
+                "skills_root": str(skills),
+                "skill_space": "default",
+            }
+
+            with mock.patch("tools.skill_agent._detect_temp_root", return_value=str(temp_root)):
+                messages = list(tool._invoke(parameters))
+
+            rendered = "".join(self._message_text(message) for message in messages)
+            self.assertEqual(llm.calls, 2)
+            self.assertNotIn(protocol, rendered)
+            self.assertNotIn('"type":"tool"', rendered)
+            self.assertEqual(rendered.count("最终答案"), 1)
 
 
 class TestShouldEmitUserText(unittest.TestCase):

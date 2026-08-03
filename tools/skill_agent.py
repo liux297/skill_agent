@@ -1108,9 +1108,11 @@ class SkillAgentTool(Tool):
                     if t:
                         text_parts.append(t)
                         combined_text_live = "".join(text_parts).strip()
-                        # 非调试模式先缓冲模型文本：后续若出现工具调用，
-                        # 这些文本只是执行前草稿，不应被当成最终答案流式展示。
-                        if verbose and combined_text_live and not saw_tool_calls:
+                        # 答案流式输出与 verbose 调试开关无关。verbose 只控制
+                        # 过程细节；自然语言内容应按模型增量实时转发。
+                        # 一旦检测到工具调用则停止转发，内部 JSON/工具协议仍由
+                        # 下方的安全边界和 should_emit_user_text 负责拦截。
+                        if combined_text_live and not saw_tool_calls:
                             # 计算可安全流式输出的文本边界（JSON/TOOL_RESULT 之前的自然语言部分）
                             safe_len = _safe_stream_boundary(combined_text_live)
                             safe_text = combined_text_live[:safe_len] if safe_len > 0 else combined_text_live
