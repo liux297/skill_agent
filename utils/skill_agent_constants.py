@@ -3,6 +3,7 @@ HISTORY_KEY_PREFIX = "skill:history:"
 SESSION_DIR_KEY_PREFIX = "skill:session_dir:"
 
 HISTORY_TRANSCRIPT_MAX_CHARS = 6000
+COMMAND_TIMEOUT_SECONDS = 600
 
 # Commands enabled in the normal mode.  This is deliberately a small set: shells,
 # package managers and network clients turn a command allow-list into arbitrary

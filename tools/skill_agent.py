@@ -59,6 +59,7 @@ from dify_plugin.entities.model.message import (
     ToolPromptMessage,
     UserPromptMessage,
 )
+from dify_plugin.entities.invoke_message import InvokeMessage
 from dify_plugin.entities.tool import ToolInvokeMessage
 
 def _open_details_markup(summary: str, *, expanded: bool = False) -> str:
@@ -479,6 +480,59 @@ class SkillAgentTool(Tool):
         details_closed = False
         final_details_opened = False
         final_details_closed = False
+        processing_log: ToolInvokeMessage | None = None
+        active_step_log: ToolInvokeMessage | None = None
+
+        LogStatus = InvokeMessage.LogMessage.LogStatus
+
+        def start_processing_log(label: str = "正在处理") -> Generator[ToolInvokeMessage]:
+            nonlocal processing_log
+            if verbose or processing_log is not None:
+                yield from ()
+                return
+            processing_log = self.create_log_message(
+                label=label,
+                data={"status": "running"},
+                status=LogStatus.START,
+            )
+            yield processing_log
+
+        def finish_active_step_log(
+            status: Any = None,
+            *,
+            error: str | None = None,
+            data: dict[str, Any] | None = None,
+        ) -> Generator[ToolInvokeMessage]:
+            nonlocal active_step_log
+            if verbose or active_step_log is None:
+                yield from ()
+                return
+            yield self.finish_log_message(
+                active_step_log,
+                status=status or LogStatus.SUCCESS,
+                error=error,
+                data=data or active_step_log.message.data,
+            )
+            active_step_log = None
+
+        def finish_processing_log(
+            status: Any = None,
+            *,
+            error: str | None = None,
+            data: dict[str, Any] | None = None,
+        ) -> Generator[ToolInvokeMessage]:
+            nonlocal processing_log
+            if verbose or processing_log is None:
+                yield from ()
+                return
+            yield from finish_active_step_log(status=status or LogStatus.SUCCESS)
+            yield self.finish_log_message(
+                processing_log,
+                status=status or LogStatus.SUCCESS,
+                error=error,
+                data=data or {"status": "done"},
+            )
+            processing_log = None
 
         def open_details() -> Generator[ToolInvokeMessage]:
             nonlocal details_opened
@@ -498,6 +552,7 @@ class SkillAgentTool(Tool):
             if final_details_opened:
                 yield from ()
                 return
+            yield from finish_processing_log()
             yield from close_details()
             final_details_opened = True
 
@@ -730,12 +785,14 @@ class SkillAgentTool(Tool):
             return f"{seconds:.1f}s"
 
         def emit_tool_progress(tool_name: str, detail: str = "", arguments: dict | None = None) -> Generator[ToolInvokeMessage]:
-            nonlocal _tool_step_counter
+            nonlocal _tool_step_counter, active_step_log
             _tool_step_counter += 1
             _step_start_times.append(_time_mod.time())
             label = _step_label()
 
             if not verbose:
+                yield from start_processing_log()
+                yield from finish_active_step_log()
                 # ── 面向用户模式：展示业务阶段，不展示工具、路径或命令 ──
                 _phase_map = {
                     "get_skill_metadata": ("🔍", "确认处理方案与适用能力"),
@@ -759,7 +816,13 @@ class SkillAgentTool(Tool):
                 desc = f"{phase}" + (f"：{detail_short}" if detail_short else "")
                 line = f"{label} {icon} {desc}。"
                 _compact_progress_lines.append(line)
-                yield self.create_text_message(line + "\n")
+                active_step_log = self.create_log_message(
+                    label=desc,
+                    data={"step": label, "status": "running"},
+                    status=LogStatus.START,
+                    parent=processing_log,
+                )
+                yield active_step_log
                 return
 
             # ── 调试模式：展示分类、工具参数与实际命令，方便定位问题 ──
@@ -816,7 +879,18 @@ class SkillAgentTool(Tool):
                     detail = result.get("exception") or result.get("stderr") or result.get("_diagnostic")
                     if detail:
                         yield self.create_text_message(f"  ↳ detail: {_shorten_text(redact_user_visible_text(detail), 2000)}\n")
-                # 非 verbose 模式下不输出错误结果，只保留进度行
+                else:
+                    yield from finish_active_step_log(
+                        status=LogStatus.ERROR,
+                        error=_user_safe_error(tool_name, str(err)),
+                        data={"status": "error", "elapsed": elapsed_str.strip("（）")},
+                    )
+                # 非 verbose 模式下不输出错误文本，只保留原生日志状态
+                return
+            if not verbose:
+                yield from finish_active_step_log(
+                    data={"status": "done", "elapsed": elapsed_str.strip("（）")},
+                )
                 return
             # ── 调试模式下展示关键结果 ──
             if tool_name == "list_installed_skills":
@@ -1108,11 +1182,11 @@ class SkillAgentTool(Tool):
                     if t:
                         text_parts.append(t)
                         combined_text_live = "".join(text_parts).strip()
-                        # 答案流式输出与 verbose 调试开关无关。verbose 只控制
-                        # 过程细节；自然语言内容应按模型增量实时转发。
-                        # 一旦检测到工具调用则停止转发，内部 JSON/工具协议仍由
-                        # 下方的安全边界和 should_emit_user_text 负责拦截。
-                        if combined_text_live and not saw_tool_calls:
+                        # Debug mode may stream natural language immediately.
+                        # User mode buffers the first model pass until we know it
+                        # is the final answer, so planning prefaces never leak
+                        # into the answer body.
+                        if verbose and combined_text_live and not saw_tool_calls:
                             # 计算可安全流式输出的文本边界（JSON/TOOL_RESULT 之前的自然语言部分）
                             safe_len = _safe_stream_boundary(combined_text_live)
                             safe_text = combined_text_live[:safe_len] if safe_len > 0 else combined_text_live
@@ -1137,7 +1211,10 @@ class SkillAgentTool(Tool):
                 return "", [], {"error": "stream_parse_failed", "exception": str(e)}, chunks_count, streamed_any
 
         try:
-            yield from open_details()  # 开启过程折叠块
+            if verbose:
+                yield from open_details()  # 开启过程折叠块
+            else:
+                yield from start_processing_log()
             for step_idx in range(max_steps):
                 compact()
                 _dbg(f"step={step_idx+1}/{max_steps} messages={len(messages)}")

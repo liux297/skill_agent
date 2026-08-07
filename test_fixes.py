@@ -1,5 +1,6 @@
 """临时测试文件：验证代码修复的正确性"""
 import json
+import subprocess
 import unittest
 import tempfile
 from pathlib import Path
@@ -11,7 +12,7 @@ from unittest import mock
 import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
-from utils.skill_agent_constants import ALLOWED_COMMANDS, UNSAFE_COMMANDS
+from utils.skill_agent_constants import ALLOWED_COMMANDS, COMMAND_TIMEOUT_SECONDS, UNSAFE_COMMANDS
 from utils.skill_agent_exec import _detect_skills_root, _normalize_skill_space
 from utils.skill_agent_runtime import _AgentRuntime
 from utils.skill_agent_runtime import _extract_declared_skill_version
@@ -159,7 +160,7 @@ class TestLiveAnswerStreaming(unittest.TestCase):
     def _message_text(message):
         return str(getattr(getattr(message, "message", None), "text", "") or "")
 
-    def test_final_answer_streams_while_verbose_is_disabled(self):
+    def test_final_answer_uses_native_log_while_verbose_is_disabled(self):
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)
             skills = base / "skills"
@@ -187,19 +188,19 @@ class TestLiveAnswerStreaming(unittest.TestCase):
             with mock.patch("tools.skill_agent._detect_temp_root", return_value=str(temp_root)):
                 output = tool._invoke(parameters)
                 messages = [next(output)]
-                # The process panel is emitted before the model is consumed.
+                # A native running log is emitted before the model is consumed,
+                # so the user sees activity without answer-body prefaces.
                 self.assertEqual(llm.consumed, 0)
                 messages.append(next(output))
-                # Closing the process panel happens as soon as the first model
-                # delta arrives, before the remaining deltas are consumed.
-                self.assertEqual(llm.consumed, 1)
-                messages.append(next(output))
-                self.assertEqual(llm.consumed, 1)
+                # User mode waits until the model pass is complete before
+                # streaming answer text, preventing planning text from leaking.
+                self.assertEqual(llm.consumed, 4)
                 messages.extend(output)
 
             rendered = "".join(self._message_text(message) for message in messages)
             self.assertEqual(llm.consumed, 4)
             self.assertEqual(rendered.count("内容流式"), 1)
+            self.assertNotIn("<details", rendered)
 
     def test_internal_json_stays_hidden_before_streaming_final_answer(self):
         with tempfile.TemporaryDirectory() as td:
@@ -211,7 +212,7 @@ class TestLiveAnswerStreaming(unittest.TestCase):
             protocol = '{"type":"tool","name":"list_installed_skills","arguments":{}}'
             llm = self._SequencedLLM(
                 [
-                    [protocol[:12], protocol[12:35], protocol[35:]],
+                    ["我先查看一下。", protocol[:12], protocol[12:35], protocol[35:]],
                     ["最", "终", "答", "案"],
                 ]
             )
@@ -237,6 +238,7 @@ class TestLiveAnswerStreaming(unittest.TestCase):
 
             rendered = "".join(self._message_text(message) for message in messages)
             self.assertEqual(llm.calls, 2)
+            self.assertNotIn("我先查看一下", rendered)
             self.assertNotIn(protocol, rendered)
             self.assertNotIn('"type":"tool"', rendered)
             self.assertEqual(rendered.count("最终答案"), 1)
@@ -500,6 +502,33 @@ class TestPython3Rewrite(unittest.TestCase):
         result = self._simulate_exe_check(["node", "app.js"])
         self.assertFalse(result.get("rewritten"))
         self.assertNotIn("error", result)
+
+
+class TestCommandTimeout(unittest.TestCase):
+    """命令执行上限应为 10 分钟，且返回元数据与实际超时一致。"""
+
+    def test_execute_command_uses_ten_minute_timeout(self):
+        with tempfile.TemporaryDirectory() as td:
+            runtime = _AgentRuntime(
+                skills_root=td,
+                session_dir=td,
+                max_steps=1,
+                memory_turns=1,
+                allowed_commands=set(ALLOWED_COMMANDS),
+            )
+            expired = subprocess.TimeoutExpired([sys.executable, "worker.py"], COMMAND_TIMEOUT_SECONDS)
+            with mock.patch("utils.skill_agent_runtime.subprocess.run", side_effect=expired) as run:
+                result = runtime._execute_command(
+                    command=[sys.executable, "worker.py"],
+                    cwd=td,
+                    exe_fallback="python",
+                )
+
+            self.assertEqual(COMMAND_TIMEOUT_SECONDS, 600)
+            self.assertEqual(run.call_args.kwargs["timeout"], 600)
+            self.assertEqual(result["error"], "command_timeout")
+            self.assertEqual(result["timeout_seconds"], 600)
+            self.assertIn("超过 600 秒超时", result["exception"])
 
 
 class TestWorkspaceContainment(unittest.TestCase):

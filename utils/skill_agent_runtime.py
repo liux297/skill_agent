@@ -18,6 +18,7 @@ from utils.skill_agent_exec import (
 )
 from utils.skill_agent_constants import (
     ALLOWED_COMMANDS,
+    COMMAND_TIMEOUT_SECONDS,
     MAX_ARCHIVE_MEMBERS,
     MAX_ARCHIVE_UNCOMPRESSED_BYTES,
     UNSAFE_COMMANDS,
@@ -445,7 +446,7 @@ class _AgentRuntime:
                 # 隔离子进程 stdin，防止子进程通过继承的 stdin 偷读
                 # plugin_daemon 与插件之间的 stdio 协议管道导致后续调用全部卡死
                 stdin=subprocess.DEVNULL,
-                timeout=300,
+                timeout=COMMAND_TIMEOUT_SECONDS,
             )
             stdout = result.stdout.strip()
             stderr = result.stderr.strip()
@@ -469,7 +470,12 @@ class _AgentRuntime:
         except FileNotFoundError as e:
             return {"error": "executable_not_found", "exe": str(command[0] or exe_fallback), "exception": str(e)}
         except subprocess.TimeoutExpired as e:
-            return {"error": "command_timeout", "exe": str(command[0] or exe_fallback), "timeout_seconds": 300, "exception": f"命令执行超过 300 秒超时: {str(e)}"}
+            return {
+                "error": "command_timeout",
+                "exe": str(command[0] or exe_fallback),
+                "timeout_seconds": COMMAND_TIMEOUT_SECONDS,
+                "exception": f"命令执行超过 {COMMAND_TIMEOUT_SECONDS} 秒超时: {str(e)}",
+            }
         except Exception as e:
             return {"error": "subprocess_failed", "exe": str(command[0] or exe_fallback), "exception": str(e)}
 
