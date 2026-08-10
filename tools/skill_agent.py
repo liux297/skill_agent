@@ -1182,12 +1182,12 @@ class SkillAgentTool(Tool):
                             saw_tool_calls = True
                     if t:
                         text_parts.append(t)
-                        combined_text_live = "".join(text_parts).strip()
-                        # Debug mode may stream natural language immediately.
-                        # User mode buffers the first model pass until we know it
-                        # is the final answer, so planning prefaces never leak
-                        # into the answer body.
-                        if verbose and combined_text_live and not saw_tool_calls:
+                    combined_text_live = "".join(text_parts).strip()
+                    # 实时流式输出自然语言部分（verbose 与非 verbose 均启用）。
+                    # 安全边界 _safe_stream_boundary + should_emit_user_text 会
+                    # 拦截 JSON/TOOL_RESULT 协议文本；一旦出现 tool_calls 即停止
+                    # 流式，避免规划前言污染最终答案正文。
+                    if combined_text_live and not saw_tool_calls:
                             # 计算可安全流式输出的文本边界（JSON/TOOL_RESULT 之前的自然语言部分）
                             safe_len = _safe_stream_boundary(combined_text_live)
                             safe_text = combined_text_live[:safe_len] if safe_len > 0 else combined_text_live
