@@ -552,7 +552,8 @@ class SkillAgentTool(Tool):
             if final_details_opened:
                 yield from ()
                 return
-            yield from finish_processing_log()
+            # 注意：不在此处 finish_processing_log，避免 LOG finish 信号
+            # 夹在 TEXT 流中间打断最终答案的增量流式合并
             yield from close_details()
             final_details_opened = True
 
@@ -1586,6 +1587,9 @@ class SkillAgentTool(Tool):
                 yield from stream_text_to_user("未生成任何文本或文件输出。")
 
             yield from close_final_details()
+            # 最终答案 TEXT 流式结束后，再收尾 processing_log，
+            # 避免提前发出 LOG finish 信号打断 TEXT 增量流式
+            yield from finish_processing_log()
 
             yielded: set[str] = set()
             yielded_fingerprints: set[str] = set()
