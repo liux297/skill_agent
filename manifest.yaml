@@ -3,6 +3,7 @@ type: plugin
 author: liux297
 name: skill_agent
 repo: https://github.com/liux297/skill_agent
+contact: 297218348@qq.com
 label:
   zh_Hans: Skill_Agent
   en_US: Skill_Agent
