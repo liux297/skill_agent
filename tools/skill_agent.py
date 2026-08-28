@@ -119,9 +119,50 @@ def _normalize_user_answer(text: str) -> str:
     return answer
 
 
+_THINK_BLOCK_RE = re.compile(r"<think>[\s\S]*?</think>", re.DOTALL)
+
+
+def _strip_thinking(text: str) -> str:
+    """移除模型内联输出的思考过程（`` 块），只保留最终答案。
+
+    覆盖三种形态：完整思考块、流式中间态（`<think` 未闭合，其后内容全部丢弃）、
+    残留的孤立闭合标签（vLLM 插件会把 reasoning_content 包装成该格式合并进 content）。
+    """
+    if not text or ("<think" not in text and "</think" not in text):
+        return text
+    out = _THINK_BLOCK_RE.sub("", text)
+    # 流式中间态：思考未闭合时，其后内容全部丢弃（等待 </think> 到达后再输出）
+    open_pos = out.find("<think")
+    if open_pos >= 0:
+        out = out[:open_pos]
+    # 清理无开头却有闭合的残留标签
+    return out.replace("</think>", "").strip()
+
+
+def _ensure_thinking_disabled(model: Any) -> Any:
+    """对 vLLM 供应商模型在调用前注入 enable_thinking=false，从源头关闭思考输出。
+
+    仅当 provider 为 vllm 且用户未显式配置 enable_thinking 时才注入，
+    避免影响其他模型供应商及用户显式开启思考的场景。
+    """
+    try:
+        provider = str(getattr(model, "provider", "") or "")
+        if "vllm" not in provider.lower():
+            return model
+        params = getattr(model, "completion_params", None)
+        if params is None or not isinstance(params, dict) or "enable_thinking" in params:
+            return model
+        # pydantic 模型允许直接修改字段；LLMModelConfig.completion_params 是普通 dict
+        model.completion_params = {**params, "enable_thinking": False}
+        _dbg("injected enable_thinking=false for vllm provider")
+    except Exception as exc:  # 注入失败不影响原有调用流程
+        _dbg(f"inject enable_thinking failed: {exc}")
+    return model
+
+
 class SkillAgentTool(Tool):
     def _invoke(self, tool_parameters: dict[str, Any]) -> Generator[ToolInvokeMessage]:
-        model = tool_parameters.get("model")
+        model = _ensure_thinking_disabled(tool_parameters.get("model"))
         query = tool_parameters.get("query")
         max_steps = int(tool_parameters.get("max_steps") or 8)
         memory_turns = int(tool_parameters.get("memory_turns") or 10)
@@ -1064,7 +1105,7 @@ class SkillAgentTool(Tool):
                 if not text:
                     return
                 yield from open_final_details()
-                tagged = _normalize_user_answer(text) + "\n\n"
+                tagged = _normalize_user_answer(_strip_thinking(text)) + "\n\n"
                 step = max(1, int(typing_chunk))
                 for i in range(0, len(tagged), step):
                     yield self.create_text_message(tagged[i : i + step])
@@ -1075,7 +1116,7 @@ class SkillAgentTool(Tool):
             def should_emit_user_text(text: str) -> bool:
                 if not text:
                     return False
-                s = str(text)
+                s = _strip_thinking(str(text))
                 stripped = s.lstrip()
                 # TOOL_RESULT 及其部分前缀（TOOL、TOOL_、TOOL_R 等）是内部协议，不应展示
                 if stripped.startswith(_TOOL_RESULT_PREFIXES):
@@ -1166,7 +1207,7 @@ class SkillAgentTool(Tool):
                             saw_tool_calls = True
                     if text:
                         text_parts.append(text)
-                    combined_text = "".join(text_parts).strip()
+                    combined_text = _strip_thinking("".join(text_parts))
                     if combined_text and not saw_tool_calls and should_emit_user_text(combined_text):
                         yield from emit_typing(combined_text)
                     return combined_text, tool_calls_all, nontext_content, chunks_count, streamed_any
@@ -1186,7 +1227,7 @@ class SkillAgentTool(Tool):
                             saw_tool_calls = True
                     if t:
                         text_parts.append(t)
-                    combined_text_live = "".join(text_parts).strip()
+                    combined_text_live = _strip_thinking("".join(text_parts))
                     # 调试模式可实时流式输出自然语言；用户模式缓冲首轮模型输出，
                     # 直到确认为最终答案才输出，避免规划前言泄露到答案正文
                     # （安全边界 _safe_stream_boundary + should_emit_user_text 会
@@ -1206,7 +1247,7 @@ class SkillAgentTool(Tool):
                                         yield self.create_text_message(new[i : i + step])
                                         streamed_any = True
                                 emitted_len = len(safe_text)
-                combined_text = "".join(text_parts).strip()
+                combined_text = _strip_thinking("".join(text_parts))
                 if emitted_prefix:
                     yield self.create_text_message("\n\n")
                 elif combined_text and not saw_tool_calls and should_emit_user_text(combined_text):
@@ -1429,14 +1470,14 @@ class SkillAgentTool(Tool):
                         final_text = str(action.get("content") or "")
                         _dbg(f"final_json content_len={len(final_text)}")
                     else:
-                        final_text = res_text
+                        final_text = _strip_thinking(res_text)
                         _dbg(f"final_text content_len={len(final_text)}")
                         if streamed_any and final_text:
                             final_text_already_streamed = True
                     break
 
                 if action.get("type") != "tool":
-                    final_text = res_text
+                    final_text = _strip_thinking(res_text)
                     _dbg(f"final_non_tool type={action.get('type')!s} content_len={len(final_text)}")
                     break
 

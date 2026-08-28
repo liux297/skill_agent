@@ -170,6 +170,17 @@ skills/
 !skill_agent-0.2.9.difypkg
 dify-plugin-*
 
+# Local work log with credentials (never commit)
+WORK_LOG.md
+
+# Reference copies from langgenius/dify-plugins (not part of this plugin)
+docs/plugin-review-guidelines.md
+docs/plugin-submission-requirements.md
+.github/workflows/pre-check-plugin.yaml
+.github/workflows/upload-merged-plugin.yaml
+.github/pull_request_template.md
+.github/ISSUE_TEMPLATE/
+
 # Plugin signing keys (never commit)
 *.pem
 *.private

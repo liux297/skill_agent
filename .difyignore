@@ -183,6 +183,10 @@ docs/
 Euraxluo/
 zhengyanglsun/
 CONTRIBUTING.md
+WORK_LOG.md
+pr_body.md
+# 开发者指南文档仅存仓库，不打进插件包（保持包结构同 0.2.39 一致）
+SKILL_DEV_GUIDE.md
 
 # Mac
 .DS_Store
@@ -193,6 +197,9 @@ Thumbs.db
 # Dify plugin packages
 #  To prevent packaging repetitively
 *.difypkg
+# 本地临时诊断文件，禁止打进插件包
+.tmp*
+
 # Local signing material must never be shipped inside the plugin archive.
 *.pem
 temp/
