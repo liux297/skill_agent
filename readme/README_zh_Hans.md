@@ -1,6 +1,6 @@
 # Skill Agent 完整使用说明
 
-**版本：** 0.2.40 · **类型：** Dify 工具插件 · **许可证：** Apache-2.0
+**版本：** 0.2.41 · **类型：** Dify 工具插件 · **许可证：** Apache-2.0
 **作者：** [liux297](https://github.com/liux297) · **项目地址：** https://github.com/liux297/skill_agent
 
 [English README](../README.md) · [操作场景手册](../GUIDE.md) · [隐私说明](../PRIVACY.md)

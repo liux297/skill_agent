@@ -6,7 +6,9 @@ import uuid
 import base64
 import hashlib
 from collections.abc import Generator
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from utils.tools import (
     _build_prompt_message_tools,
@@ -169,6 +171,12 @@ class SkillAgentTool(Tool):
         history_turns = int(tool_parameters.get("history_turns") or 0)
         max_stdout_chars = int(tool_parameters.get("max_stdout_chars") or 30000)
         system_prompt = tool_parameters.get("system_prompt") or "你是一个智能助手，能够使用 Skills 工具箱中的技能完成用户的各种任务。"
+        # 注入当前时间：Agent 天然感知真实日期，相对日期（“明天/下周”）换算不再依赖模型猜测或 date 命令
+        try:
+            _now_str = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M (%A)")
+        except Exception:  # 运行环境缺 tz 数据时退回本地时间
+            _now_str = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+        system_prompt = f"{system_prompt}\n\n当前时间：{_now_str}。涉及“明天/下周”等相对日期时，必须基于此时间换算。"
         # 调试模式开关：保留 verbose 参数名以兼容既有工作流。
         _verbose_raw = tool_parameters.get("verbose")
         verbose = _verbose_raw not in (False, "false", "False", 0, "0")
