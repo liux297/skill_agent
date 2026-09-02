@@ -446,13 +446,7 @@ class SkillAgentTool(Tool):
             + "补充规则6（最小化中间确认原则）：在处理用户请求的全过程中，绝对禁止不必要的中间确认和询问。遇到以下情况必须直接执行而不是追问：(1) 用户输入有错别字但意图明确（如'安些'='哪些'）；(2) 请求简短但结合技能索引可以推断意图；(3) 任何可以通过自主判断解决的问题。只有删除用户数据、执行不可逆操作等真正关键决策点才允许暂停确认。\n"
             + "补充规则7（禁止输出裸命令）：绝对禁止将 curl、bash、python 等原始命令作为文本输出给用户。所有命令执行必须通过 run_skill_command 或 run_temp_command 工具调用。即使 SKILL.md 中包含 curl 示例，你也必须将其转换为 run_skill_command 工具调用来执行，而不是输出 curl 命令文本。\n"
             + "补充规则8（必须完成到最终结果）：你必须持续推进直到获得最终结果并用业务语言回复用户。绝对禁止在以下情况停止：(1) 刚调用完工具但还未处理返回数据；(2) 已拿到 API 数据但还未转换为用户可理解的业务回复；(3) 任何中间步骤。只有当你已经用业务语言向用户给出了完整的最终回答后，才可以结束。\n"
-            + "补充规则9：技能管理流程——当用户上传技能压缩包（zip）并要求添加/安装技能时，请按以下步骤执行：\n"
-            + "  (1) 直接调用 install_skill(source_path=zip 路径或解压后的目录, skill_name=用户指定的名称)；系统会校验并安全解压 zip\n"
-            + "  (2) 调用 install_skill 成功后，技能会安装到 skills_root\n"
-            + "  (3) 安装成功后即可通过 get_skill_metadata / list_skill_files 等工具使用该技能\n"
-            + "  (4) 如需查看已安装的全部技能，调用 list_installed_skills()\n"
-            + "  (5) 如需删除技能，调用 uninstall_skill(skill_name)；skill_name 可使用列表返回的 name 或 folder，重名时使用 folder\n"
-            + "  (6) 如需更新已有技能，调用 update_skill(skill_name, source_path)，source_path 为新的 zip 或解压目录\n"
+            + "补充规则9（禁止管理技能）：Skill_Agent 节点仅用于使用已配置的技能完成用户任务，禁止在本节点内安装、卸载、更新或列举技能。如需管理技能，必须由管理员通过独立的技能管理节点进行操作。\n"
             + (uploads_context or "")
             + "你必须把实现过程中的中间产物写入 temp 会话目录（脚本、草稿、生成物等）：\n"
             + "- 写文本：write_temp_file\n"
@@ -469,17 +463,13 @@ class SkillAgentTool(Tool):
             + "- read_temp_file(relative_path, max_chars)\n"
             + "- list_temp_files(max_depth)\n"
             + "- run_temp_command(command, cwd_relative, auto_install)\n"
-            + "- export_temp_file(temp_relative_path, workspace_relative_path, overwrite)  # 不复制，仅标记交付名\n"
-            + "- install_skill(source_path, skill_name)  # 从上传的 zip/目录安装技能到 skills_root\n"
-            + "- list_installed_skills()  # 查看所有已安装技能\n"
-            + "- uninstall_skill(skill_name)  # 按 name 或 folder 删除已安装私有技能\n"
-            + "- update_skill(skill_name, source_path)  # 按名称用新 zip/目录覆盖更新技能\n\n"
+            + "- export_temp_file(temp_relative_path, workspace_relative_path, overwrite)  # 不复制，仅标记交付名\n\n"
             + "如果模型支持 function call，请直接发起工具调用；若不支持，则用 JSON 协议响应：\n"
             + '{"type":"tool","name":"get_skill_metadata","arguments":{"skill_name":"xxx"}}\n'
             + '或 {"type":"final","content":"..."}\n\n'
             + "技能索引（用于判断是否需要调用技能）：\n"
             + "注意：调用技能相关工具时，skill_name 填索引中的 name 或 folder 均可，系统会识别为同一技能（enabled_skills 配置同理，两者等价）。\n"
-            + (lambda si: (lambda s: s if len(s) <= 8000 else json.dumps({"skills": si.get("skills", [])[:10], "truncated": True, "note": "技能索引过长已截断，请用 list_installed_skills 查看完整列表"}, ensure_ascii=False))(json.dumps(si, ensure_ascii=False)))(skills_index)
+            + (lambda si: (lambda s: s if len(s) <= 8000 else json.dumps({"skills": si.get("skills", [])[:10], "truncated": True, "note": "技能索引过长已截断"}, ensure_ascii=False))(json.dumps(si, ensure_ascii=False)))(skills_index)
             + (resume_context or "")
         )
 
@@ -698,22 +688,6 @@ class SkillAgentTool(Tool):
                         "mime_type": _guess_mime_type(out_name),
                     }
                 return result
-            elif tool_name == "install_skill":
-                return runtime.install_skill(
-                    source_path=str(arguments.get("source_path") or ""),
-                    skill_name=str(arguments.get("skill_name") or ""),
-                )
-            elif tool_name == "list_installed_skills":
-                return runtime.list_installed_skills()
-            elif tool_name == "uninstall_skill":
-                return runtime.uninstall_skill(
-                    skill_name=str(arguments.get("skill_name") or ""),
-                )
-            elif tool_name == "update_skill":
-                return runtime.update_skill(
-                    skill_name=str(arguments.get("skill_name") or ""),
-                    source_path=str(arguments.get("source_path") or ""),
-                )
             else:
                 return {"error": f"unknown tool: {tool_name}"}
 
@@ -779,7 +753,7 @@ class SkillAgentTool(Tool):
             """构建工具操作描述（用于进度展示）。"""
             _skill_name_arg = str(arguments.get("skill_name") or "")
             _rel_path_arg = str(arguments.get("relative_path") or "")
-            if tool_name in ("get_skill_metadata", "list_skill_files", "install_skill", "uninstall_skill", "update_skill"):
+            if tool_name in ("get_skill_metadata", "list_skill_files"):
                 return _skill_name_arg
             if tool_name in ("write_temp_file", "read_temp_file", "read_skill_file"):
                 return _rel_path_arg
@@ -856,10 +830,6 @@ class SkillAgentTool(Tool):
                     "list_temp_files": ("📋", "核对生成结果"),
                     "run_temp_command": ("⚙️", "生成或转换交付内容"),
                     "export_temp_file": ("📦", "整理最终交付文件"),
-                    "install_skill": ("🔧", "配置所需处理能力"),
-                    "list_installed_skills": ("🔧", "检查可用处理能力"),
-                    "uninstall_skill": ("🗑️", "移除指定处理能力"),
-                    "update_skill": ("🔄", "更新处理能力"),
                     "get_session_context": ("ℹ️", "恢复本次任务上下文"),
                 }
                 icon, phase = _phase_map.get(tool_name, ("⚙️", "处理中"))
@@ -888,10 +858,6 @@ class SkillAgentTool(Tool):
                 "list_temp_files": ("📋", "查看临时目录中的文件列表"),
                 "run_temp_command": ("⚙️", f"执行临时命令：{detail}"),
                 "export_temp_file": ("📦", f"标记交付文件：{detail}，准备发送给用户"),
-                "install_skill": ("🔧", f"安装技能《{detail}》到工具箱"),
-                "list_installed_skills": ("🔧", "查看当前已安装的技能列表"),
-                "uninstall_skill": ("🗑️", f"卸载技能《{detail}》"),
-                "update_skill": ("🔄", f"更新技能《{detail}》到最新版本"),
                 "get_session_context": ("ℹ️", "获取会话上下文，恢复历史交互状态"),
             }
             icon, desc = _detail_map.get(tool_name, ("⚙️", f"执行 {tool_name}"))
@@ -907,9 +873,9 @@ class SkillAgentTool(Tool):
         def emit_tool_result(tool_name: str, result: Any) -> Generator[ToolInvokeMessage]:
             """工具执行完后展示简短结果摘要。
 
-            部分工具（如 list_installed_skills）无论 verbose 是否开启都展示结果，
-            确保用户能看到关键信息，避免 LLM 未生成最终文本时用户一无所获。
-            每步结果都带上耗时，让用户感知执行进度。
+            调试模式下展示关键执行结果，让用户感知执行进度。
+            普通模式中每个工具步骤只展示 emit_tool_progress 的一句话，
+            工具结果交给模型汇总到最终回答，避免重复、噪声和技术细节泄露。
             """
             if not isinstance(result, dict):
                 return
@@ -943,30 +909,6 @@ class SkillAgentTool(Tool):
                 yield from finish_active_step_log(
                     data={"status": "done", "elapsed": elapsed_str.strip("（）")},
                 )
-                return
-            # ── 调试模式下展示关键结果 ──
-            if tool_name == "list_installed_skills":
-                count = result.get("skills_count", 0)
-                skills_list = result.get("skills") or []
-                if count == 0:
-                    yield self.create_text_message(f"  📭 当前未安装任何技能 {elapsed_str}\n")
-                else:
-                    yield self.create_text_message(f"  ✔️ 已安装 {count} 个技能 {elapsed_str}：\n")
-                    for s in skills_list[:30]:
-                        if isinstance(s, dict):
-                            name = s.get("name") or s.get("folder") or ""
-                            folder = s.get("folder") or ""
-                            desc = (s.get("description") or "")[:60]
-                            has_md = "✔" if s.get("has_skill_md") else "✘"
-                            line = f"    • {name}"
-                            if folder and folder != name:
-                                line += f"（目录：{folder}）"
-                            if desc:
-                                line += f" — {desc}"
-                            line += f"  [{has_md} SKILL.md]"
-                            yield self.create_text_message(line + "\n")
-                    if len(skills_list) > 30:
-                        yield self.create_text_message(f"    … 还有 {len(skills_list) - 30} 个技能未展示\n")
                 return
             # 按工具类型展示关键结果（带耗时和更详细的摘要）
             if tool_name == "get_skill_metadata":
@@ -1015,15 +957,6 @@ class SkillAgentTool(Tool):
             elif tool_name == "export_temp_file":
                 name = result.get("requested_name", "")
                 yield self.create_text_message(f"  ✔️ 已标记交付：{name} {elapsed_str}\n")
-            elif tool_name == "install_skill":
-                skill = result.get("skill", "")
-                yield self.create_text_message(f"  ✔️ 技能《{skill}》安装成功 {elapsed_str}\n")
-            elif tool_name == "uninstall_skill":
-                skill = result.get("skill", "")
-                yield self.create_text_message(f"  ✔️ 技能《{skill}》已卸载 {elapsed_str}\n")
-            elif tool_name == "update_skill":
-                skill = result.get("skill", "")
-                yield self.create_text_message(f"  ✔️ 技能《{skill}》已更新 {elapsed_str}\n")
 
         def persist_llm_assets(parts: Any) -> list[str]:
             if not parts or not isinstance(parts, list):
