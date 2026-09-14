@@ -13,10 +13,10 @@ from zoneinfo import ZoneInfo
 from utils.tools import (
     _build_prompt_message_tools,
     _detect_model_supports_fc,
-    _download_file_content,
     _estimate_tokens,
     _extract_first_json_object,
     _extract_url_and_name,
+    _get_file_content,
     _guess_mime_type,
     _infer_ext_from_url,
     _is_allow_reply,
@@ -38,7 +38,9 @@ from utils.skill_agent_exec import (
     _detect_skills_root,
     _detect_temp_root,
     _normalize_skill_space,
+    _resolve_effective_skill_space,
 )
+from utils.skill_agent_persist import restore_all_skills
 from utils.skill_agent_runtime import _AgentRuntime
 from utils.skill_agent_schemas import TOOL_SCHEMAS, _coerce_command_to_list, _tool_call_retry_prompt, _validate_tool_arguments
 from utils.skill_agent_storage import (
@@ -189,10 +191,13 @@ class SkillAgentTool(Tool):
         allow_unsafe_commands = tool_parameters.get("allow_unsafe_commands") in (True, "true", "True", 1, "1")
 
         try:
-            skill_space = _normalize_skill_space(tool_parameters.get("skill_space"))
+            raw_skill_space = tool_parameters.get("skill_space")
         except ValueError as exc:
             yield self.create_text_message(f"❌Skill Space 配置无效：{exc}\n")
             return
+        # 使用 app_id 自动隔离：用户未显式指定时，按 app_id 分配独立空间
+        app_id = getattr(self.session, "app_id", None)
+        skill_space = _resolve_effective_skill_space(raw_skill_space, app_id)
         skills_root = _detect_skills_root(tool_parameters.get("skills_root"), skill_space)
         enabled_skills_raw = str(tool_parameters.get("enabled_skills") or "").strip()
         enabled_skills = {
@@ -206,6 +211,21 @@ class SkillAgentTool(Tool):
         if include_shared_skills and skill_space != SHARED_SKILL_SPACE:
             shared_skills_root = _detect_skills_root(None, SHARED_SKILL_SPACE)
         storage = self.session.storage
+        # 自动恢复：升级后技能目录为空时从 storage 恢复
+        try:
+            _skills_in_root = [
+                e for e in os.listdir(skills_root)
+                if os.path.isdir(os.path.join(skills_root, e)) and not e.startswith(".")
+            ] if os.path.isdir(skills_root) else []
+        except Exception:
+            _skills_in_root = []
+        if not _skills_in_root:
+            try:
+                _restore_result = restore_all_skills(storage, skill_space, skills_root)
+                if _restore_result.get("restored", 0) > 0:
+                    _dbg(f"auto-restored {_restore_result['restored']} skills from storage")
+            except Exception:
+                pass
         custom_variables_raw = tool_parameters.get("custom_variables") or ""
         custom_variables: dict[str, str] = {}
         if isinstance(custom_variables_raw, str) and custom_variables_raw.strip():
@@ -263,6 +283,42 @@ class SkillAgentTool(Tool):
 
         file_items: list[Any] = []
         files_param = tool_parameters.get("files")
+
+        # ---- 兜底：如果 files 参数是 JSON 字符串，尝试解析 ----
+        if isinstance(files_param, str) and files_param.strip():
+            try:
+                import json as _json
+                parsed = _json.loads(files_param)
+                if isinstance(parsed, list):
+                    _dbg(f"[file-diag] files_param was JSON string, parsed {len(parsed)} items")
+                    files_param = parsed
+                elif isinstance(parsed, dict):
+                    _dbg("[file-diag] files_param was JSON string, parsed 1 dict item")
+                    files_param = [parsed]
+            except Exception:
+                pass
+
+        # ---- 诊断：打印插件收到的全部参数键和 files 详情 ----
+        if verbose:
+            _dbg(f"[file-diag] tool_parameters keys: {list(tool_parameters.keys())}")
+            _dbg(f"[file-diag] files_param type={type(files_param).__name__}, "
+                 f"len={len(files_param) if isinstance(files_param, (list, tuple)) else 'N/A'}, "
+                 f"bool={bool(files_param)}")
+            if isinstance(files_param, list):
+                for idx, f in enumerate(files_param):
+                    _dbg(f"[file-diag] files[{idx}] type={type(f).__name__}, "
+                         f"keys={list(f.keys()) if isinstance(f, dict) else 'N/A'}, "
+                         f"has_blob={hasattr(f, 'blob')}, "
+                         f"identity={f.get('dify_model_identity', 'MISSING') if isinstance(f, dict) else 'N/A'}")
+            elif isinstance(files_param, dict):
+                _dbg(f"[file-diag] files_param(dict) keys={list(files_param.keys())}, "
+                     f"identity={files_param.get('dify_model_identity', 'MISSING')}")
+            # 检查是否有其他可能的文件参数键
+            for alt_key in ("file", "sys_files", "input_files", "attachments"):
+                alt_val = tool_parameters.get(alt_key)
+                if alt_val:
+                    _dbg(f"[file-diag] alt key '{alt_key}' present: type={type(alt_val).__name__}, bool={bool(alt_val)}")
+
         if isinstance(files_param, list):
             file_items = [x for x in files_param if x]
         elif files_param:
@@ -270,21 +326,50 @@ class SkillAgentTool(Tool):
         elif tool_parameters.get("file"):
             file_items = [tool_parameters.get("file")]
 
+        # ---- 兜底：扫描 tool_parameters 中所有可能是文件列表的值 ----
+        if not file_items:
+            for key, val in tool_parameters.items():
+                if key == "files" or key == "file":
+                    continue
+                if isinstance(val, list) and val and all(
+                    isinstance(item, dict) and item.get("dify_model_identity") == "__dify__file__"
+                    for item in val
+                ):
+                    _dbg(f"[file-diag] found files in unexpected key '{key}' ({len(val)} items)")
+                    file_items = val
+                    break
+                if hasattr(val, "blob"):  # 单个 File 对象
+                    _dbg(f"[file-diag] found File object in unexpected key '{key}'")
+                    file_items = [val]
+                    break
+
+        if verbose:
+            _dbg(f"[file-diag] resolved file_items count: {len(file_items)}")
+            if not file_items:
+                # 输出用户可见的诊断信息（仅 debug 模式）
+                yield self.create_text_message(
+                    f"[文件诊断] 插件未收到任何文件。\n"
+                    f"tool_parameters 的键: {list(tool_parameters.keys())}\n"
+                    f"files_param 类型: {type(files_param).__name__}\n"
+                    f"请确认工作流中 files 参数已映射到 sys.files。\n"
+                )
+
         uploads_context = ""
         if file_items:
             uploads_dir = _safe_join(session_dir, "uploads")
             os.makedirs(uploads_dir, exist_ok=True)
             uploaded: list[dict[str, Any]] = []
             for item in file_items:
-                url, name = _extract_url_and_name(item)
-                if not url:
-                    yield self.create_text_message("❌未能获取上传文件 URL（files[i].url）。\n")
-                    return
                 try:
-                    content = _download_file_content(str(url), timeout=45, max_bytes=MAX_UPLOAD_BYTES)
+                    content, file_filename, file_url = _get_file_content(item, timeout=45, max_bytes=MAX_UPLOAD_BYTES)
                 except Exception as e:
                     yield self.create_text_message(f"❌文件下载失败：{str(e)}\n")
                     return
+                url = file_url or ""
+                # 文件名优先级：SDK File 对象 > URL 推断 > 安全随机名
+                name = file_filename
+                if not name:
+                    _, name = _extract_url_and_name(item)
                 ext = _infer_ext_from_url(str(url))
                 filename = _safe_filename(str(name) if name else None, fallback_ext=ext)
                 abs_path = os.path.join(uploads_dir, filename)
@@ -297,7 +382,10 @@ class SkillAgentTool(Tool):
 
                 rel_path = f"uploads/{filename}"
                 mime = None
-                if isinstance(item, dict) and item.get("mime_type"):
+                # 优先从 SDK File 对象获取 mime_type，其次 dict 入参
+                if hasattr(item, "mime_type") and getattr(item, "mime_type", None):
+                    mime = str(getattr(item, "mime_type")).strip() or None
+                elif isinstance(item, dict) and item.get("mime_type"):
                     mime = str(item.get("mime_type") or "").strip() or None
                 if not mime:
                     try:

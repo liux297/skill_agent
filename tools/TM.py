@@ -13,13 +13,23 @@ from dify_plugin.entities.tool import ToolInvokeMessage
 
 # 复用 utils/tools.py 中的公共工具函数，消除重复实现
 from utils.skill_agent_constants import MAX_ARCHIVE_MEMBERS, MAX_ARCHIVE_UNCOMPRESSED_BYTES, MAX_UPLOAD_BYTES
-from utils.skill_agent_exec import _detect_skills_root, _normalize_skill_space
-from utils.tools import _download_file_content, _extract_url_and_name, _infer_ext_from_url, _safe_filename
+from utils.skill_agent_exec import _detect_skills_root, _normalize_skill_space, _resolve_effective_skill_space
+from utils.skill_agent_persist import backup_skill, remove_skill_backup
+from utils.tools import _download_file_content, _extract_url_and_name, _get_file_content, _infer_ext_from_url, _safe_filename
 
 
-def get_file_content(url: str, timeout: int = 30) -> bytes:
+def get_file_content(file_item, timeout: int = 30) -> bytes:
+    """兼容旧调用：接受 File 对象、dict 或 URL 字符串。"""
+    if isinstance(file_item, str):
+        # 旧调用方式：直接传 URL 字符串
+        try:
+            return _download_file_content(file_item, timeout=timeout, max_bytes=MAX_UPLOAD_BYTES)
+        except Exception as e:
+            raise RuntimeError(f"文件下载失败: {str(e)}") from e
+    # 新方式：使用统一函数，优先 SDK File.blob
     try:
-        return _download_file_content(url, timeout=timeout, max_bytes=MAX_UPLOAD_BYTES)
+        content, _, _ = _get_file_content(file_item, timeout=timeout, max_bytes=MAX_UPLOAD_BYTES)
+        return content
     except Exception as e:
         raise RuntimeError(f"文件下载失败: {str(e)}") from e
 
@@ -130,21 +140,20 @@ class TMTool(Tool):
         normalized_command = " ".join(command.casefold().split())
         files_param = tool_parameters.get("files")
         archive_url = str(tool_parameters.get("archive_url") or "").strip()
-        try:
-            skill_space = _normalize_skill_space(tool_parameters.get("skill_space"))
-        except ValueError as exc:
-            yield self.create_text_message(f"❌Skill Space 配置无效：{exc}\n")
-            return
+        # 使用 app_id 自动隔离技能空间
+        app_id = getattr(self.session, "app_id", None)
+        skill_space = _resolve_effective_skill_space(tool_parameters.get("skill_space"), app_id)
+        storage = self.session.storage
 
         if command in ("查看技能", "查看 技能", "查看") or normalized_command in {
             "list", "list skill", "list skills",
         }:
             skills = list_skills_sorted(skill_space)
             if not skills:
-                yield self.create_text_message(f"Skill Space《{skill_space}》中暂无技能。\n")
+                yield self.create_text_message(f"技能库中暂无技能。\n")
                 return
             lines = [f"- {p.name}" for p in skills]
-            yield self.create_text_message(f"Skill Space《{skill_space}》中的技能：\n" + "\n".join(lines))
+            yield self.create_text_message("当前应用技能列表：\n" + "\n".join(lines))
             return
 
         if command in ("新增技能", "存入技能", "保存技能") or normalized_command in {
@@ -175,7 +184,7 @@ class TMTool(Tool):
 
             for file_item in file_items:
                 url, preferred_name = _extract_url_and_name(file_item)
-                if not url:
+                if not url and not hasattr(file_item, "blob"):
                     yield self.create_text_message("❌无法获取文件URL，请检查入参（files[i].url）。\n")
                     return
 
@@ -188,7 +197,7 @@ class TMTool(Tool):
                     filename_attr = file_item.get("filename", filename_attr)
 
                 try:
-                    content = get_file_content(url)
+                    content = get_file_content(file_item)
                 except Exception as e:
                     yield self.create_text_message(str(e))
                     return
@@ -232,7 +241,13 @@ class TMTool(Tool):
                             yield self.create_text_message(f"❌安装技能失败：{e}\n")
                             return
 
-            yield self.create_text_message(f"✅技能已安装到 Skill Space《{skill_space}》：\n" + "\n".join(installed) + "\n")
+            yield self.create_text_message(f"✅技能已安装：\n" + "\n".join(installed) + "\n")
+            # 备份新安装的技能到 storage（跨升级持久化）
+            for name in installed:
+                try:
+                    backup_skill(storage, str(skills_dir / name), skill_space)
+                except Exception:
+                    pass
             skills = list_skills_sorted(skill_space)
             lines = [f"- {p.name}" for p in skills]
             yield self.create_text_message("当前技能列表：\n" + ("\n".join(lines) if lines else "（空）\n"))
@@ -249,20 +264,135 @@ class TMTool(Tool):
                 yield self.create_text_message("❌请按名称删除，例如：删除技能 flow-assistant-skill\n")
                 return
             if target is None:
-                yield self.create_text_message(f"❌Skill Space《{skill_space}》中不存在技能《{skill_name}》。\n")
+                yield self.create_text_message(f"❌不存在技能《{skill_name}》。\n")
                 return
             try:
                 shutil.rmtree(target, ignore_errors=False)
             except Exception as e:
                 yield self.create_text_message(f"❌删除失败：{e}\n")
                 return
-            yield self.create_text_message(f"✅已从 Skill Space《{skill_space}》删除技能《{target.name}》。\n")
+            # 同步清理 storage 中的备份
+            try:
+                remove_skill_backup(storage, target.name, skill_space)
+            except Exception:
+                pass
+            yield self.create_text_message(f"✅已删除技能《{target.name}》。\n")
             skills = list_skills_sorted(skill_space)
             if not skills:
                 yield self.create_text_message("当前技能列表为空。\n")
             else:
                 lines = [f"- {p.name}" for p in skills]
                 yield self.create_text_message("当前技能列表：\n" + "\n".join(lines))
+            return
+
+        # ==================== 更新技能（删除旧版 + 安装新版） ====================
+        update_prefixes = ("更新技能", "update skill", "update")
+        if command.startswith("更新技能") or any(
+            normalized_command.startswith((prefix + " ", prefix + ":")) for prefix in update_prefixes[1:]
+        ):
+            target_name = _skill_name_from_aliases(command, update_prefixes)
+            if not target_name:
+                yield self.create_text_message("❌请指定要更新的技能名称。例如：更新技能 flow-assistant-skill\n")
+                return
+
+            # 复用新增技能相同的文件获取逻辑
+            file_items: list[Any] = []
+            if isinstance(files_param, list):
+                file_items = [x for x in files_param if x]
+            elif files_param:
+                file_items = [files_param]
+            elif "file" in tool_parameters and tool_parameters["file"]:
+                file_items = [tool_parameters["file"]]
+            if not file_items and archive_url:
+                file_items = [{"url": archive_url}]
+            if not file_items:
+                yield self.create_text_message("❌更新技能需要上传新的技能包（zip 文件）。\n")
+                return
+
+            skills_dir = get_skills_dir(skill_space)
+
+            for file_item in file_items:
+                url, preferred_name = _extract_url_and_name(file_item)
+                if not url and not hasattr(file_item, "blob"):
+                    yield self.create_text_message("❌无法获取文件URL，请检查入参。\n")
+                    return
+                filename_attr = None
+                try:
+                    filename_attr = getattr(file_item, "filename", None)
+                except Exception:
+                    filename_attr = None
+                if isinstance(file_item, dict):
+                    filename_attr = file_item.get("filename", filename_attr)
+                try:
+                    content = get_file_content(file_item)
+                except Exception as e:
+                    yield self.create_text_message(str(e))
+                    return
+                if filename_attr:
+                    filename = Path(filename_attr).name
+                else:
+                    ext = _infer_ext_from_url(url)
+                    filename = _safe_filename(preferred_name, fallback_ext=ext if ext else ".zip")
+
+                with tempfile.TemporaryDirectory(prefix="skill-update-") as td:
+                    tmp_dir = Path(td)
+                    zip_path = tmp_dir / filename
+                    try:
+                        zip_path.write_bytes(content)
+                    except Exception as e:
+                        yield self.create_text_message(f"❌保存临时文件失败：{e}\n")
+                        return
+                    extract_dir = tmp_dir / "extracted"
+                    try:
+                        _safe_extract_zip(zip_path, extract_dir)
+                    except Exception as e:
+                        yield self.create_text_message(f"❌解压失败：{e}\n")
+                        return
+
+                    skill_folders = _find_skill_folders(extract_dir)
+                    if not skill_folders:
+                        yield self.create_text_message("❌压缩包内未找到技能目录（应包含 SKILL.md）。\n")
+                        return
+
+                    # 查找与目标同名的技能文件夹，或取第一个
+                    extracted_map = {f.name: f for f in skill_folders}
+                    new_folder = extracted_map.get(target_name)
+                    if not new_folder and len(skill_folders) == 1:
+                        new_folder = skill_folders[0]
+                    if not new_folder:
+                        yield self.create_text_message(
+                            f"❌压缩包中未找到技能《{target_name}》。\n"
+                        )
+                        return
+
+                    old_target = skills_dir / target_name
+                    # 1. 删除旧技能
+                    if old_target.exists():
+                        try:
+                            shutil.rmtree(old_target, ignore_errors=False)
+                        except Exception as e:
+                            yield self.create_text_message(f"❌删除旧技能《{target_name}》失败：{e}\n")
+                            return
+                        try:
+                            remove_skill_backup(storage, target_name, skill_space)
+                        except Exception:
+                            pass
+                    # 2. 安装新技能
+                    try:
+                        shutil.move(str(new_folder), str(old_target))
+                    except Exception as e:
+                        yield self.create_text_message(f"❌安装技能《{target_name}》失败：{e}\n")
+                        return
+                    # 3. 备份到 storage
+                    try:
+                        backup_skill(storage, str(old_target), skill_space)
+                    except Exception:
+                        pass
+
+            yield self.create_text_message(f"✅已更新 Skill Space《{skill_space}》中的技能《{target_name}》。\n")
+            skills = list_skills_sorted(skill_space)
+            lines = [f"- {p.name}" for p in skills]
+            yield self.create_text_message("当前技能列表：\n" + ("\n".join(lines) if lines else "（空）\n"))
             return
 
         download_prefixes = ("下载技能", "download skill", "download", "export skill", "export")

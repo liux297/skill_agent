@@ -443,3 +443,49 @@ def _download_file_content(url: str, timeout: int = 30, max_bytes: int = 50 * 10
                 raise ValueError(f"上传文件超过大小限制（{max_bytes} bytes）")
             chunks.append(chunk)
         return b"".join(chunks)
+
+
+def _get_file_content(file_item: Any, timeout: int = 45, max_bytes: int = 50 * 1024 * 1024) -> tuple[bytes, str | None, str | None]:
+    """统一文件内容获取：优先使用 SDK File.blob（高成功率），失败时回退到裸 HTTP 下载。
+
+    返回 (content, filename, url)：
+    - content: 文件字节内容
+    - filename: 文件名（可能为 None）
+    - url: 文件 URL（可能为 None）
+
+    优先级：
+    1. SDK File 对象的 .blob 属性 —— 由 dify_plugin SDK 内置处理，能正确访问 Dify 内部文件 URL
+    2. 裸 HTTP 下载（_download_file_content）—— 兼容非 SDK 对象和 dict 入参
+    """
+    content = None
+    filename = None
+    url = None
+
+    # ---- 优先路径：SDK File 对象（dify_plugin.file.file.File）----
+    # SDK 在 Tool.invoke() 中已将 files 参数自动转换为 File 对象，
+    # 其 .blob 属性使用 httpx 并正确处理 Dify 内部文件 URL
+    if hasattr(file_item, "blob"):
+        try:
+            content = file_item.blob
+        except Exception:
+            content = None  # 回退到下面的裸 HTTP
+        filename = getattr(file_item, "filename", None) or None
+        url = getattr(file_item, "url", None) or None
+
+    # ---- 回退路径：dict 或普通对象，提取 URL 后裸 HTTP 下载 ----
+    if content is None:
+        fallback_url, fallback_name = _extract_url_and_name(file_item)
+        if not fallback_url:
+            if filename is None and url is None:
+                raise ValueError("无法获取文件 URL，请检查入参（files[i].url）")
+            # 已从 File 对象获取到 url 但 blob 失败，使用已有 url 重试
+            fallback_url = url
+        if not fallback_url:
+            raise ValueError("无法获取文件 URL，请检查入参（files[i].url）")
+        if filename is None:
+            filename = fallback_name
+        if url is None:
+            url = fallback_url
+        content = _download_file_content(str(fallback_url), timeout=timeout, max_bytes=max_bytes)
+
+    return content, filename, url

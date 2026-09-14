@@ -74,6 +74,46 @@ def _detect_temp_root(skill_space: object | None = None) -> str:
     return os.path.abspath(root)
 
 
+def _resolve_effective_skill_space(user_skill_space: object | None, app_id: str | None) -> str:
+    """确定实际使用的 skill space 名称。
+
+    - 用户显式指定了非 default 的 skill_space → 直接使用
+    - 用户未指定（default）且有 app_id → 使用 app_id 实现自动隔离
+    - 无 app_id → 回退到 default
+
+    首次使用时自动迁移旧 default 目录中的技能到 app_id 空间。
+    """
+    user_space = _normalize_skill_space(user_skill_space)
+    if user_space != DEFAULT_SKILL_SPACE:
+        return user_space
+    if not app_id or not str(app_id).strip():
+        return DEFAULT_SKILL_SPACE
+    effective = f"app-{str(app_id).strip()}"
+    # 一次性迁移：旧 default 目录有技能但新空间没有 → 移动过去
+    try:
+        old_dir = os.path.join(_plugin_root(), "skills")
+        new_base = os.path.join(os.path.dirname(old_dir), "skill_spaces", effective)
+        if os.path.isdir(old_dir) and not os.path.isdir(new_base):
+            old_skills = [
+                e for e in os.listdir(old_dir)
+                if os.path.isdir(os.path.join(old_dir, e)) and not e.startswith(".")
+            ]
+            if old_skills:
+                os.makedirs(new_base, exist_ok=True)
+                import shutil
+                for name in old_skills:
+                    src = os.path.join(old_dir, name)
+                    dst = os.path.join(new_base, name)
+                    if not os.path.exists(dst):
+                        try:
+                            shutil.move(src, dst)
+                        except Exception:
+                            pass
+    except Exception:
+        pass
+    return effective
+
+
 def _cleanup_old_temp_sessions(temp_root: str, *, keep: int, protect_dirs: set[str] | None = None) -> None:
     protect = {os.path.abspath(p) for p in (protect_dirs or set()) if p}
     try:

@@ -1,6 +1,8 @@
 RESUME_KEY_PREFIX = "skill:resume:"
 HISTORY_KEY_PREFIX = "skill:history:"
 SESSION_DIR_KEY_PREFIX = "skill:session_dir:"
+SKILL_BACKUP_INDEX_PREFIX = "skill:backup:index:"
+SKILL_BACKUP_DATA_PREFIX = "skill:backup:data:"
 
 HISTORY_TRANSCRIPT_MAX_CHARS = 6000
 COMMAND_TIMEOUT_SECONDS = 600

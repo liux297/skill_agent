@@ -2,16 +2,16 @@ identity:
   author: "liux297"
   name: "skill_agent"
   label:
-    zh_Hans: "Skill_Agent"
-    en_US: "Skill_Agent"
-    ja_JP: "Skill_Agent"
-    pt_BR: "Skill_Agent"
+    zh_Hans: "Skill Agent"
+    en_US: "Skill Agent"
+    ja_JP: "Skill Agent"
+    pt_BR: "Skill Agent"
   description:
     zh_Hans: "基于 Skill 渐进式披露模式构建的通用型 Agent 插件，参考/借鉴 OpenClaw 与 Hermes 的 Agent 架构，支持自定义变量注入、文件交付与跨轮次交互。"
     en_US: "General-purpose Agent plugin built on the Skill Progressive Disclosure pattern, with references to OpenClaw and Hermes agent architectures, supporting custom_variables injection, file delivery and cross-turn interaction."
     ja_JP: "Skill 漸進的開示パターンに基づく汎用的な Agent プラグイン。OpenClaw および Hermes の Agent アーキテクチャを参考にしています。"
     pt_BR: "Plugin de Agent de uso geral baseado no padrão de Divulgação Progressiva de Skills, com referência às arquiteturas de agent OpenClaw e Hermes."
-  icon: "skill.svg"
+  icon: "icon.svg"
 
 #########################################################################################
 # If you want to support OAuth, you can uncomment the following code.

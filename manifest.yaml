@@ -1,4 +1,4 @@
-version: 0.2.42
+version: 0.2.45
 type: plugin
 author: liux297
 name: skill_agent
@@ -35,8 +35,8 @@ description:
     Progressiva de Skills. Trata o diretório local skills/ como uma caixa de
     ferramentas, suporta injeção de custom_variables, entrega de arquivos e saída
     em streaming.
-icon: skill.svg
-icon_dark: skill.svg
+icon: icon.svg
+icon_dark: icon-dark.svg
 resource:
   memory: 268435456
   permission:
