@@ -1503,11 +1503,38 @@ class SkillAgentTool(Tool):
                         _dbg(f"final_text content_len={len(final_text)}")
                         if streamed_any and final_text:
                             final_text_already_streamed = True
+                    # final_text 为空（模型返回空 content 或思考块被剥离后无剩余），
+                    # 纳入 empty_responses 重试，而非直接 break 给用户空回复。
+                    # 若有非文本内容（图片等），视为有效响应，不重试
+                    if (not final_text or not final_text.strip()) and not nontext:
+                        empty_responses += 1
+                        _dbg(f"empty_final_text_count={empty_responses}")
+                        if empty_responses < 3:
+                            final_text = None
+                            messages.append(
+                                UserPromptMessage(
+                                    content='你的回答内容为空。请重新输出最终回答：{"type":"final","content":"你的回答"}'
+                                )
+                            )
+                            continue
+                        final_text = "模型连续返回空响应，请稍后重试或更换模型。"
                     break
 
                 if action.get("type") != "tool":
                     final_text = _strip_thinking(res_text)
                     _dbg(f"final_non_tool type={action.get('type')!s} content_len={len(final_text)}")
+                    if (not final_text or not final_text.strip()) and not nontext:
+                        empty_responses += 1
+                        _dbg(f"empty_final_text_count={empty_responses}")
+                        if empty_responses < 3:
+                            final_text = None
+                            messages.append(
+                                UserPromptMessage(
+                                    content='你的回答内容为空。请重新输出最终回答。'
+                                )
+                            )
+                            continue
+                        final_text = "模型连续返回空响应，请稍后重试或更换模型。"
                     break
 
                 name = str(action.get("name") or "")
