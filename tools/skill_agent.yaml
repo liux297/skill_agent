@@ -113,6 +113,42 @@ parameters:
     llm_description: Select an LLM to run this tool.
     form: form
 
+  - name: enable_thinking
+    type: boolean
+    required: false
+    default: false
+    label:
+      en_US: Enable Thinking
+      zh_Hans: 启用模型思考
+      pt_BR: Habilitar thinking
+      ja_JP: 思考を有効にする
+    human_description:
+      en_US: "Whether to enable the model's native thinking. Off by default so the max_tokens budget is not consumed by hidden reasoning (prevents empty content)."
+      zh_Hans: "是否开启模型原生思考。默认关闭，避免思考内容占用 max_tokens 导致最终无内容输出（content field is required 报错）。"
+      pt_BR: "Se ativa o raciocínio nativo do modelo. Desativado por padrão para que o orçamento de max_tokens não seja consumido por raciocínio oculto."
+      ja_JP: "モデルのネイティブ思考を有効にするか。デフォルトオフで、思考が max_tokens を消費して空コンテンツになるのを防ぎます。"
+    llm_description: Whether to enable the model's native thinking. Off by default to avoid consuming the max_tokens budget.
+    form: form
+
+  - name: max_tokens
+    type: number
+    required: false
+    default: 4096
+    min: 256
+    max: 32768
+    label:
+      en_US: Max tokens
+      zh_Hans: 输出最大 Token
+      pt_BR: Max tokens
+      ja_JP: 最大トークン
+    human_description:
+      en_US: "Maximum number of tokens for a single model output. When thinking is off this limits the final answer length."
+      zh_Hans: "单次模型输出的最大 Token 数。关闭思考后此值主要限制最终答案长度。"
+      pt_BR: "Número máximo de tokens em uma única saída do modelo."
+      ja_JP: "1回のモデル出力における最大トークン数。"
+    llm_description: Maximum number of tokens for a single model output.
+    form: form
+
   - name: max_steps
     type: number
     required: true

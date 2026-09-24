@@ -143,30 +143,44 @@ def _strip_thinking(text: str) -> str:
     return out.replace("</think>", "").strip()
 
 
-def _ensure_thinking_disabled(model: Any) -> Any:
-    """对 vLLM 供应商模型在调用前注入 enable_thinking=false，从源头关闭思考输出。
+def _apply_model_params(model: Any, *, enable_thinking: bool = False, max_tokens: int | None = None) -> Any:
+    """按 skill_agent 节点开关强制写回模型 completion_params。
 
-    仅当 provider 为 vllm 且用户未显式配置 enable_thinking 时才注入，
-    避免影响其他模型供应商及用户显式开启思考的场景。
+    不依赖 Dify 对自定义 tool 的 completion_params 透传（其往往拿不到 enable_thinking
+    且默认 max_tokens 偏小），直接在插件内稳定覆盖：
+    - enable_thinking 始终按节点取值写入（默认不思考），避免 qwen3 原生 thinking
+      占满 max_tokens 导致最终缺失 content 字段；
+    - max_tokens 仅在节点显式提供时覆盖，否则沿用模型默认 / Dify 透传值。
     """
     try:
-        provider = str(getattr(model, "provider", "") or "")
-        if "vllm" not in provider.lower():
-            return model
         params = getattr(model, "completion_params", None)
-        if params is None or not isinstance(params, dict) or "enable_thinking" in params:
-            return model
-        # pydantic 模型允许直接修改字段；LLMModelConfig.completion_params 是普通 dict
-        model.completion_params = {**params, "enable_thinking": False}
-        _dbg("injected enable_thinking=false for vllm provider")
-    except Exception as exc:  # 注入失败不影响原有调用流程
-        _dbg(f"inject enable_thinking failed: {exc}")
+        base = dict(params) if isinstance(params, dict) else {}
+        base["enable_thinking"] = bool(enable_thinking)
+        if max_tokens and max_tokens > 0:
+            base["max_tokens"] = int(max_tokens)
+        model.completion_params = base
+        _dbg(f"model params applied: enable_thinking={enable_thinking} max_tokens={max_tokens or 'keep'}")
+    except Exception as exc:  # 覆盖失败不影响原有调用流程
+        _dbg(f"apply model params failed: {exc}")
     return model
 
 
 class SkillAgentTool(Tool):
     def _invoke(self, tool_parameters: dict[str, Any]) -> Generator[ToolInvokeMessage]:
-        model = _ensure_thinking_disabled(tool_parameters.get("model"))
+        _enable_thinking = tool_parameters.get("enable_thinking") in (
+            True,
+            "true",
+            "True",
+            1,
+            "1",
+        )
+        _max_tokens_raw = tool_parameters.get("max_tokens")
+        _max_tokens = int(_max_tokens_raw) if _max_tokens_raw not in (None, "") else None
+        model = _apply_model_params(
+            tool_parameters.get("model"),
+            enable_thinking=_enable_thinking,
+            max_tokens=_max_tokens,
+        )
         query = tool_parameters.get("query")
         max_steps = int(tool_parameters.get("max_steps") or 8)
         memory_turns = int(tool_parameters.get("memory_turns") or 10)
