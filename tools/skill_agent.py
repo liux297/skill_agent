@@ -372,6 +372,8 @@ class SkillAgentTool(Tool):
         if file_items:
             uploads_dir = _safe_join(session_dir, "uploads")
             os.makedirs(uploads_dir, exist_ok=True)
+            # 幂等覆盖：同名文件直接以 "wb" 覆盖写入，不同名历史文件保留但不注入本轮清单，
+            # 避免清空整个目录时误删 skill 生成的交付/中间文件。
             uploaded: list[dict[str, Any]] = []
             for item in file_items:
                 try:
@@ -426,9 +428,7 @@ class SkillAgentTool(Tool):
             uploads_dir = _safe_join(session_dir, "uploads")
             os.makedirs(uploads_dir, exist_ok=True)
 
-        # 仅在前面未构建上传文件清单时，才从磁盘扫描补充
-        if not uploads_context:
-            uploads_context = _build_uploads_context(session_dir)
+        # 不再从磁盘扫描旧文件：每轮只使用当前上传的文件，避免多轮对话中误用上一轮的旧附件
 
         runtime = _AgentRuntime(
             skills_root=skills_root,
