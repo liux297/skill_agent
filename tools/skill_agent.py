@@ -1505,7 +1505,7 @@ class SkillAgentTool(Tool):
                             )
                         )
                         continue
-                    final_text = "模型连续返回空响应，未生成任何结果。"
+                    final_text = "抱歉，模型连续几次没能给出有效回复，可能刚才有点卡顿。您可以再试一次，或换个说法再问我，我会继续帮您处理。"
                     break
 
                 if not action or action.get("type") == "final":
@@ -1531,7 +1531,7 @@ class SkillAgentTool(Tool):
                                 )
                             )
                             continue
-                        final_text = "模型连续返回空响应，请稍后重试或更换模型。"
+                        final_text = "抱歉，模型连续几次没能给出有效回复，可能刚才有点卡顿。您可以再试一次，或换个说法再问我，我会继续帮您处理。"
                     break
 
                 if action.get("type") != "tool":
@@ -1548,7 +1548,7 @@ class SkillAgentTool(Tool):
                                 )
                             )
                             continue
-                        final_text = "模型连续返回空响应，请稍后重试或更换模型。"
+                        final_text = "抱歉，模型连续几次没能给出有效回复，可能刚才有点卡顿。您可以再试一次，或换个说法再问我，我会继续帮您处理。"
                     break
 
                 name = str(action.get("name") or "")
@@ -1692,14 +1692,14 @@ class SkillAgentTool(Tool):
                 )
                 yield from stream_text_to_user("已生成文件。")
             else:
-                assistant_text_for_history = "未生成任何文本或文件输出。"
+                assistant_text_for_history = "抱歉，这一步没能成功产出内容，可能刚才模型有些卡顿。您可以再发一次刚才的指令，我会重新处理。"
                 _append_history_turn(
                     storage,
                     history_key=history_key,
                     user_text=user_input,
                     assistant_text=assistant_text_for_history,
                 )
-                yield from stream_text_to_user("未生成任何文本或文件输出。")
+                yield from stream_text_to_user(assistant_text_for_history)
 
             yield from close_final_details()
             # 最终答案 TEXT 流式结束后，再收尾 processing_log，

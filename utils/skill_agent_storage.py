@@ -10,20 +10,20 @@ from utils.tools import _safe_get
 
 
 def _get_session_storage_id(session: Any, skill_space: object | None = None) -> str:
-    candidates = [
-        _safe_get(session, "conversation_id"),
-        _safe_get(session, "chat_id"),
-        _safe_get(session, "task_id"),
-        _safe_get(session, "id"),
-        _safe_get(session, "session_id"),
-        _safe_get(session, "app_run_id"),
-    ]
-    for c in candidates:
-        if isinstance(c, str) and c.strip():
-            session_id = c.strip()
-            break
+    """确定存储隔离锚点：优先 Dify 会话 (conversation_id)，缺失时退回单次请求 id。
+
+    以往这里会把取不到的候选一路回退到 "global"，导致不同会话共享同一个
+    storage key 与 temp 目录，造成跨会话文件互通。现改为：
+    - conversation_id：Dify 会话语义，同会话多轮可续跑，不同会话严格隔离
+    - session_id：SDK 每次请求唯一，用于 conversation 缺失时的安全兜底（绝不跨会话泄漏）
+    - 仅二者皆为空才回退 "global"
+    """
+    conversation_id = _safe_get(session, "conversation_id")
+    if isinstance(conversation_id, str) and conversation_id.strip():
+        session_id = conversation_id.strip()
     else:
-        session_id = "global"
+        request_id = _safe_get(session, "session_id")
+        session_id = request_id.strip() if isinstance(request_id, str) and request_id.strip() else "global"
     space = _normalize_skill_space(skill_space)
     if space == DEFAULT_SKILL_SPACE:
         return session_id
