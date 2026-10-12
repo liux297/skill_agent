@@ -116,6 +116,37 @@ def _archive_uploads_to_history(uploads_dir: str) -> None:
             continue
 
 
+_ATTACHMENT_BLOCK_STARTS = ("[上传文件清单]", "[文件诊断]")
+_ATTACHMENT_BLOCK_LINES = (
+    "以下路径均相对于本次会话的 session_dir",
+    "本轮只使用上述清单中的文件",
+    "本轮没有新上传的附件",
+    "禁止虚构或沿用旧附件",
+    "tool_parameters 的键",
+    "files_param 类型",
+    "请确认工作流中 files 参数已映射到 sys.files",
+)
+
+
+def _strip_stale_attachment_blocks(text: str) -> str:
+    """剔除历史回复中的附件清单/文件诊断段，防止旧轮附件信息被模型复述。"""
+    if not text:
+        return text
+    kept: list[str] = []
+    in_block = False
+    for ln in text.splitlines():
+        s = ln.strip()
+        if s.startswith(_ATTACHMENT_BLOCK_STARTS):
+            in_block = True
+            continue
+        if in_block:
+            if s.startswith("- ") or s.startswith(_ATTACHMENT_BLOCK_LINES):
+                continue
+            in_block = False
+        kept.append(ln)
+    return "\n".join(kept).strip()
+
+
 def _open_details_markup(summary: str, *, expanded: bool = False) -> str:
     """Return a single process panel without an accordion peer."""
     open_attr = " open" if expanded else ""
@@ -409,14 +440,6 @@ class SkillAgentTool(Tool):
 
         if verbose:
             _dbg(f"[file-diag] resolved file_items count: {len(file_items)}")
-            if not file_items:
-                # 输出用户可见的诊断信息（仅 debug 模式）
-                yield self.create_text_message(
-                    f"[文件诊断] 插件未收到任何文件。\n"
-                    f"tool_parameters 的键: {list(tool_parameters.keys())}\n"
-                    f"files_param 类型: {type(files_param).__name__}\n"
-                    f"请确认工作流中 files 参数已映射到 sys.files。\n"
-                )
 
         uploads_context = ""
         uploads_dir = _safe_join(session_dir, "uploads")
@@ -556,7 +579,7 @@ class SkillAgentTool(Tool):
                     if not isinstance(t, dict):
                         continue
                     u = str(t.get("user") or "").strip()
-                    a = str(t.get("assistant") or "").strip()
+                    a = _strip_stale_attachment_blocks(str(t.get("assistant") or "").strip())
                     if not u and not a:
                         continue
                     picked.append((u, a))
@@ -634,6 +657,7 @@ class SkillAgentTool(Tool):
             + "补充规则8（必须完成到最终结果）：你必须持续推进直到获得最终结果并用业务语言回复用户。绝对禁止在以下情况停止：(1) 刚调用完工具但还未处理返回数据；(2) 已拿到 API 数据但还未转换为用户可理解的业务回复；(3) 任何中间步骤。只有当你已经用业务语言向用户给出了完整的最终回答后，才可以结束。\n"
             + "补充规则9（禁止管理技能）：Skill_Agent 节点仅用于使用已配置的技能完成用户任务，禁止在本节点内安装、卸载、更新或列举技能。如需管理技能，必须由管理员通过独立的技能管理节点进行操作。\n"
             + (uploads_context or "")
+            + "补充规则10（附件只认本轮）：判断和回答附件相关问题时，只以本轮 [上传文件清单] 及本轮实际解析结果为准；历史对话消息中的附件内容、解析结果及其他衍生数据均已过期，禁止引用或复述。如需历史附件，必须到 session_dir/uploads/_history/ 重新读取原文件并解析后再回答，不得凭历史消息回忆。\n"
             + "你必须把实现过程中的中间产物写入 temp 会话目录（脚本、草稿、生成物等）：\n"
             + "- 写文本：write_temp_file\n"
             + "- 运行命令生成文件：run_temp_command\n"
