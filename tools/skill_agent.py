@@ -5,6 +5,7 @@ import time
 import uuid
 import base64
 import hashlib
+import mimetypes
 from collections.abc import Generator
 from datetime import datetime
 from typing import Any
@@ -65,6 +66,55 @@ from dify_plugin.entities.model.message import (
 )
 from dify_plugin.entities.invoke_message import InvokeMessage
 from dify_plugin.entities.tool import ToolInvokeMessage
+
+# mimetypes 不收录常见 Office 文档类型，按 mime 推断扩展名时优先查此表
+_MIME_EXT_OVERRIDES = {
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.ms-excel": ".xls",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/msword": ".doc",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "application/vnd.ms-powerpoint": ".ppt",
+    "text/markdown": ".md",
+    "text/csv": ".csv",
+    "application/json": ".json",
+}
+
+
+def _archive_uploads_to_history(uploads_dir: str) -> None:
+    """每轮开始：把上一轮遗留的 uploads/ 顶层附件移入 uploads/_history/。
+
+    保证 uploads/ 顶层只含本轮附件（模型不会把旧附件误当本轮的），
+    同时旧附件仍可通过 uploads/_history/ 跨轮引用。
+    """
+    try:
+        names = os.listdir(uploads_dir)
+    except Exception:
+        return
+    if not names:
+        return
+    history_dir = os.path.join(uploads_dir, "_history")
+    try:
+        os.makedirs(history_dir, exist_ok=True)
+    except Exception:
+        return
+    for name in names:
+        if name == "_history":
+            continue
+        src = os.path.join(uploads_dir, name)
+        if not os.path.isfile(src):
+            continue
+        base, ext = os.path.splitext(name)
+        dst = os.path.join(history_dir, name)
+        n = 1
+        while os.path.exists(dst):
+            dst = os.path.join(history_dir, f"{base}-{n}{ext}")
+            n += 1
+        try:
+            os.replace(src, dst)
+        except Exception:
+            continue
+
 
 def _open_details_markup(summary: str, *, expanded: bool = False) -> str:
     """Return a single process panel without an accordion peer."""
@@ -369,25 +419,58 @@ class SkillAgentTool(Tool):
                 )
 
         uploads_context = ""
+        uploads_dir = _safe_join(session_dir, "uploads")
+        os.makedirs(uploads_dir, exist_ok=True)
+        # 归档上一轮遗留附件到 uploads/_history/，确保 uploads/ 顶层只含本轮附件
+        _archive_uploads_to_history(uploads_dir)
+
         if file_items:
-            uploads_dir = _safe_join(session_dir, "uploads")
-            os.makedirs(uploads_dir, exist_ok=True)
-            # 幂等覆盖：同名文件直接以 "wb" 覆盖写入，不同名历史文件保留但不注入本轮清单，
-            # 避免清空整个目录时误删 skill 生成的交付/中间文件。
             uploaded: list[dict[str, Any]] = []
-            for item in file_items:
+            used_names: set[str] = set()
+            for f_idx, item in enumerate(file_items, start=1):
                 try:
                     content, file_filename, file_url = _get_file_content(item, timeout=45, max_bytes=MAX_UPLOAD_BYTES)
                 except Exception as e:
                     yield self.create_text_message(f"❌文件下载失败：{str(e)}\n")
                     return
                 url = file_url or ""
-                # 文件名优先级：SDK File 对象 > URL 推断 > 安全随机名
+                # mime 先行：供文件名兜底扩展名推断使用（SDK File 对象 > dict 入参）
+                mime = None
+                if hasattr(item, "mime_type") and getattr(item, "mime_type", None):
+                    mime = str(getattr(item, "mime_type")).strip() or None
+                elif isinstance(item, dict) and item.get("mime_type"):
+                    mime = str(item.get("mime_type") or "").strip() or None
+                # 文件名优先级：SDK File 对象 > URL/入参推断 > 按 mime 推断扩展名的"文件N"
                 name = file_filename
                 if not name:
                     _, name = _extract_url_and_name(item)
                 ext = _infer_ext_from_url(str(url))
-                filename = _safe_filename(str(name) if name else None, fallback_ext=ext)
+                if not ext and hasattr(item, "extension") and getattr(item, "extension", None):
+                    sdk_ext = str(getattr(item, "extension")).strip()
+                    if sdk_ext and not sdk_ext.startswith("."):
+                        sdk_ext = "." + sdk_ext
+                    ext = sdk_ext
+                if not ext and mime:
+                    mime_key = mime.split(";")[0].strip().lower()
+                    ext = _MIME_EXT_OVERRIDES.get(mime_key) or ""
+                    if not ext:
+                        try:
+                            ext = mimetypes.guess_extension(mime_key) or ""
+                        except Exception:
+                            ext = ""
+                original_filename = str(name or "").strip()
+                if not original_filename:
+                    name = f"文件{f_idx}"
+                filename = _safe_filename(str(name), fallback_ext=ext)
+                # 同轮重名自动加序号后缀，避免互相覆盖；exists 为归档失败时的磁盘兜底
+                base, name_ext = os.path.splitext(filename)
+                cand = filename
+                n = 1
+                while cand in used_names or os.path.exists(os.path.join(uploads_dir, cand)):
+                    cand = f"{base}-{n}{name_ext}"
+                    n += 1
+                filename = cand
+                used_names.add(filename)
                 abs_path = os.path.join(uploads_dir, filename)
                 try:
                     with open(abs_path, "wb") as f:
@@ -397,12 +480,6 @@ class SkillAgentTool(Tool):
                     return
 
                 rel_path = f"uploads/{filename}"
-                mime = None
-                # 优先从 SDK File 对象获取 mime_type，其次 dict 入参
-                if hasattr(item, "mime_type") and getattr(item, "mime_type", None):
-                    mime = str(getattr(item, "mime_type")).strip() or None
-                elif isinstance(item, dict) and item.get("mime_type"):
-                    mime = str(item.get("mime_type") or "").strip() or None
                 if not mime:
                     try:
                         mime = _guess_mime_type(filename)
@@ -414,21 +491,28 @@ class SkillAgentTool(Tool):
                         "bytes": len(content),
                         "mime_type": mime or "",
                         "filename": filename,
+                        "original_filename": original_filename,
                         "source_url": str(url),
                     }
                 )
 
-            lines = ["\n\n[上传文件清单]", "以下路径均相对于本次会话的 session_dir："]
+            lines = ["\n\n[上传文件清单]", "以下路径均相对于本次会话的 session_dir，为本轮唯一有效附件："]
             for f in uploaded:
+                orig = str(f.get("original_filename") or "")
+                saved = str(f.get("filename") or "")
+                orig_note = f" | 原始文件名: {orig}" if orig and orig != saved else ""
                 lines.append(
-                    f"- {f.get('relative_path')} | mime={f.get('mime_type') or ''} | bytes={f.get('bytes') or 0} | filename={f.get('filename') or ''}"
+                    f"- {f.get('relative_path')} | mime={f.get('mime_type') or ''} | bytes={f.get('bytes') or 0} | filename={saved}{orig_note}"
                 )
+            lines.append(
+                "本轮只使用上述清单中的文件；uploads/_history/ 内是历史轮次附件，仅当用户明确提及之前的文件时才可引用。"
+            )
             uploads_context = "\n".join(lines) + "\n"
         else:
-            uploads_dir = _safe_join(session_dir, "uploads")
-            os.makedirs(uploads_dir, exist_ok=True)
-
-        # 不再从磁盘扫描旧文件：每轮只使用当前上传的文件，避免多轮对话中误用上一轮的旧附件
+            uploads_context = (
+                "\n\n[上传文件清单] 本轮没有新上传的附件。"
+                "禁止虚构或沿用旧附件；若用户提及'之前的/刚才的文件'，可到 uploads/_history/ 查找历史附件。\n"
+            )
 
         runtime = _AgentRuntime(
             skills_root=skills_root,
